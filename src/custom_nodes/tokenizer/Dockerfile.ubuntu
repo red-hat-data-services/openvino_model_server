@@ -14,7 +14,7 @@
 # limitations under the License.
 #
 
-FROM ubuntu:20.04
+FROM ubuntu:mantic-20240216
 
 RUN apt update && DEBIAN_FRONTEND=noninteractive apt install -y build-essential curl cmake git
 
