@@ -4,3 +4,4 @@ git+https://github.com/dtrawins/optimum-intel.git@concurrency_support
 onnx
 pillow
 optimum[diffusers]
+zipp>=3.19.1 # not directly required, pinned by Snyk to avoid a vulnerability
