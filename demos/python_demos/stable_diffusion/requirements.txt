@@ -3,3 +3,4 @@ git+https://github.com/huggingface/optimum-intel.git
 onnx
 openvino>=2023.2
 optimum[diffusers,openvino]
+setuptools>=70.0.0 # not directly required, pinned by Snyk to avoid a vulnerability
