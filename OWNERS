@@ -5,6 +5,7 @@ approvers:
   - heyselbi
   - israel-hdez
   - Jooho
+  - RH-steve-grubb
   - rpancham
   - spolti
   - terrytangyuan
@@ -15,6 +16,7 @@ approvers:
 reviewers:
   - dtrifiro
   - heyselbi
+  - RH-steve-grubb
   - rpancham
   - terrytangyuan
   - vaibhavjainwiz
