@@ -292,7 +292,7 @@ RUN make
 RUN if ! [[ $debug_bazel_flags == *"PYTHON_DISABLE=1"* ]]; then true ; else exit 0 ; fi ; \
     mkdir -p /opt/intel/openvino/python/openvino-2024.2.dist-info && \
     echo $'Metadata-Version: 1.0\nName: openvino\nVersion: 2024.2' > /opt/intel/openvino/python/openvino-2024.2.dist-info/METADATA
-ENV PYTHONPATH=/opt/intel/openvino/python:/ovms/bazel-bin/src/python/binding
+ENV PYTHONPATH=/opt/intel/openvino/python:/ovms/bazel-bin/src/python/binding:/usr/local/lib/python3.9/site-packages
 
 WORKDIR /ovms
 
@@ -501,8 +501,7 @@ COPY --from=pkg /licenses /licenses
 
 # Setup Python Demos Environment
 RUN dnf install --nodocs -y python39-pip git && dnf clean all
-COPY demos/python_demos/requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt && rm -f requirements.txt && \
+RUN pip3 install --no-cache-dir -r demos/python_demos/requirements.txt && \
     python3 -c "import nltk; nltk.download('averaged_perceptron_tagger'); nltk.download('punkt')"
 
 USER ovms
