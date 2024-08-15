@@ -10,6 +10,7 @@ tritonclient[grpc]==2.37.0.9383150  # Required to use batch string serialization
 transformers==4.40
 diffusers==0.26.3
 datasets==2.18.0
+numpy<2.0
 
 # Required for RAG Chatbot Demo:
 langchain==0.1.12
