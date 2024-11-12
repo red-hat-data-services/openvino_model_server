@@ -62,7 +62,6 @@ For more information on using Model Server in various scenarios you can check th
 * [Using binary input data](https://docs.openvino.ai/2024/ovms_docs_binary_input.html)
 
 
-
 ## References
 
 * [OpenVINO&trade;](https://software.intel.com/en-us/openvino-toolkit)
