@@ -453,7 +453,7 @@ COPY --from=pkg /licenses /licenses
 # Setup Python Demos Environment
 RUN dnf install --nodocs -y python39-pip git && dnf clean all
 COPY demos/python_demos/requirements.txt .
-RUN pip3 install --no-cache-dir -r requirements.txt && rm -f requirements.txt
+RUN echo 'networkx<=3.2.1' >> requirements.txt && pip3 install --no-cache-dir -r requirements.txt && rm -f requirements.txt
 
 USER ovms
 ENTRYPOINT ["/ovms/bin/ovms"]
