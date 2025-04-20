@@ -1,7 +1,15 @@
 accelerate==0.20.3
 numpy==1.23
-torch==1.13.1
-onnx==1.15.0
+torch==2.2.0
+onnx==1.16.0
 optimum[openvino,nncf]>=1.14.1
 ovmsclient
 openvino==2023.2.0
+aiohttp>=3.9.4 # not directly required, pinned by Snyk to avoid a vulnerability
+pyarrow>=14.0.1 # not directly required, pinned by Snyk to avoid a vulnerability
+requests>=2.32.2 # not directly required, pinned by Snyk to avoid a vulnerability
+setuptools>=65.5.1 # not directly required, pinned by Snyk to avoid a vulnerability
+sympy>=1.12 # not directly required, pinned by Snyk to avoid a vulnerability
+transformers>=4.38.0 # not directly required, pinned by Snyk to avoid a vulnerability
+urllib3>=2.2.2 # not directly required, pinned by Snyk to avoid a vulnerability
+wheel>=0.38.0 # not directly required, pinned by Snyk to avoid a vulnerability
