@@ -4,3 +4,4 @@ git+https://github.com/dtrawins/optimum-intel.git@concurrency_support
 onnx
 pillow
 optimum[diffusers]
+transformers>=4.50.0 # not directly required, pinned by Snyk to avoid a vulnerability
