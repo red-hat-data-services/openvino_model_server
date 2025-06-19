@@ -17,6 +17,9 @@ metadata:
   name: openvino-model-server-poc-on-push
   namespace: rhoai-tenant
 spec:
+  timeouts:
+    pipeline: 8h
+    tasks: 4h
   params:
   - name: git-url
     value: '{{source_url}}'
@@ -28,6 +31,24 @@ spec:
     value: Dockerfile.redhat
   - name: path-context
     value: .
+  - name: hermetic
+    value: false
+  - name: build-source-image
+    value: false
+  - name: build-image-index
+    value: false
+  - name: rebuild
+    value: true
+  - name: skip-checks
+    value: true
+  - name: build-args-file
+    value: .tekton/build-args.map
+  - name: fetch-git-tags
+    value: true
+  - name: clone-depth
+    value: "2147483647"
+  - name: build-platform
+    value: linux-extra-fast/amd64
   pipelineSpec:
     description: |
       This pipeline is ideal for building container images from a Containerfile while maintaining trust after pipeline customization.
@@ -198,6 +219,7 @@ spec:
       - name: netrc
         workspace: netrc
     - name: build-container
+      timeout: 8h
       params:
       - name: IMAGE
         value: $(params.output-image)
