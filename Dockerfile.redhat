@@ -30,6 +30,22 @@ ARG LTO_ENABLE=OFF
 ARG LTO_CXX_FLAGS=""
 ARG LTO_LD_FLAGS="-Wl,-z,relro"
 
+
+
+RUN echo "CAPI_FLAGS=$CAPI_FLAGS"
+RUN echo "LTO_CXX_FLAGS=$LTO_CXX_FLAGS"
+RUN echo "LTO_LD_FLAGS=$LTO_LD_FLAGS"
+RUN echo "debug_bazel_flags=$debug_bazel_flags"
+RUN echo "JOBS=$JOBS"
+
+RUN echo "BASE_IMAGE=$BASE_IMAGE"
+RUN echo "PROJECT_VERSION=$PROJECT_VERSION"
+RUN echo "ov_source_branch=$ov_source_branch"
+RUN echo "ov_tokenizers_branch=$ov_tokenizers_branch"
+RUN echo "RUN_TESTS=$RUN_TESTS"
+RUN echo "LTO_ENABLE=$LTO_ENABLE"
+RUN echo "GPU=$GPU"
+
 # hadolint ignore=DL3041
 RUN echo -e "max_parallel_downloads=8\nretries=50" >> /etc/dnf/dnf.conf && \
     dnf install -y https://dl.fedoraproject.org/pub/epel/epel-release-latest-9.noarch.rpm && dnf update -d6 -y && dnf install -d6 -y \
@@ -123,7 +139,7 @@ RUN dnf install -y https://mirror.stream.centos.org/9-stream/AppStream/x86_64/os
             unzip \
             vim \
             xz \
-            python3-devel \ 
+            python3-devel \
             libicu-devel && \
             dnf clean all
 
@@ -325,6 +341,7 @@ FROM $BUILD_IMAGE as capi-build
 # C api shared library
 ARG CAPI_FLAGS="--strip=always  --config=mp_off_py_off --//:distro=redhat"
 ARG JOBS=40
+
 RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared
 
 # C api app with bazel
@@ -342,7 +359,7 @@ RUN mkdir -p /ovms_release/lib/ ; find /ovms/bazel-out/k8-*/bin -iname 'libovms_
 
 FROM $BUILD_IMAGE as pkg
 
-RUN mkdir /patchelf 
+RUN mkdir /patchelf
 WORKDIR /patchelf
 # hadolint ignore=DL3003
 RUN wget -q https://github.com/NixOS/patchelf/archive/0.10.tar.gz && \
