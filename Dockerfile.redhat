@@ -13,14 +13,13 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
-#
 
 ARG BASE_IMAGE=registry.access.redhat.com/ubi9/ubi:9.6
 ARG BUILD_IMAGE=build
 ARG PKG_IMAGE=pkg
 ARG RELEASE_BASE_IMAGE=registry.access.redhat.com/ubi9-minimal:9.6
 
-FROM registry.access.redhat.com/ubi9/ubi:9.6 as base_build
+FROM $BASE_IMAGE as base_build
 ARG BASE_IMAGE=registry.access.redhat.com/ubi9/ubi:9.6
 
 SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
@@ -101,7 +100,7 @@ RUN if [ "$VERBOSE_LOGS" == "ON" ] ; then export VERBOSE=1 ; fi && ./install_ope
 ####### End of OpenCV
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
-FROM registry.access.redhat.com/ubi9/ubi:9.6 as build
+FROM base_build as build
 ARG BASE_IMAGE=registry.access.redhat.com/ubi9/ubi:9.6
 
 SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
@@ -322,7 +321,7 @@ RUN python3 -c "import json; m={'PROJECT_VERSION':'${PROJECT_VERSION}','OPENVINO
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
-FROM registry.access.redhat.com/ubi9/ubi:9.6 as capi-build
+FROM $BUILD_IMAGE as capi-build
 # C api shared library
 ARG CAPI_FLAGS="--strip=always --config=mp_off_py_off --verbose_failures --//:distro=redhat --local_ram_resources=23552 --local_cpu_resources=16 --subcommands"
 ARG JOBS=16
@@ -345,7 +344,7 @@ RUN make -f MakefileCapi cpp CAPI_FLAGS="${CAPI_FLAGS}" && \
 
 RUN mkdir -p /ovms_release/lib/ ; find /ovms/bazel-out/k8-*/bin -iname 'libovms_shared.so'  -exec cp -v {} /ovms_release/lib/ \;
 
-FROM registry.access.redhat.com/ubi9/ubi:9.6 as pkg
+FROM $BUILD_IMAGE as pkg
 
 RUN mkdir /patchelf
 WORKDIR /patchelf
@@ -373,7 +372,7 @@ RUN if [ -f /ovms_release/lib/libovms_shared.so ] ; then mv /ovms_release/lib/li
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
 
 
-FROM registry.access.redhat.com/ubi9-minimal:9.6 as release
+FROM $RELEASE_BASE_IMAGE as release
 LABEL "name"="OVMS"
 LABEL "vendor"="Intel Corporation"
 LABEL "version"="2025.1"
