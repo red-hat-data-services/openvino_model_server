@@ -334,30 +334,16 @@ RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:capi_cpp_example
 # C-API benchmark app
 #RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} //src:capi_benchmark
 
-# Build and run capi_benchmark in one go
-RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} //src:capi_benchmark && \
-    capi_path=$(bazel info bazel-bin)/src/capi_benchmark && \
-    echo "Running binary: $capi_path" && \
-    chmod +x "$capi_path" && \
-    "$capi_path" --niter 2 --nstreams 1 --servable_name "dummy"
-
-
-#RUN find / -type f -name capi_benchmark
-#RUN find / \
-#  \( -path /proc -o -path /sys -o -path /dev \) -prune \
- # -o -type f -name capi_benchmark -print
-
-#RUN bazel cquery //src:capi_benchmark --output=starlark \
- # --starlark:expr="target.files.to_list()"
-
+#workaround for debugging
 #RUN find /root/.cache/bazel/ -type f -name '*capi_benchmark*'
 
+RUN pwd && ls -al
 
-RUN ./bazel-bin/src/capi_benchmark --niter 2 --nstreams 1 --servable_name "dummy"
-# C-api C/C++ app with gcc
-COPY MakefileCapi /ovms/
-RUN make -f MakefileCapi cpp CAPI_FLAGS="${CAPI_FLAGS}" && \
-    make -f MakefileCapi c CAPI_FLAGS="${CAPI_FLAGS}"
+RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} //src:capi_benchmark && \
+    echo "WORKDIR at build-time: $PWD" && \
+    bazel info bazel-bin && \
+    find $(bazel info bazel-bin)/src -type f -name capi_benchmark
+
 
 RUN mkdir -p /ovms_release/lib/ ; find /ovms/bazel-out/k8-*/bin -iname 'libovms_shared.so'  -exec cp -v {} /ovms_release/lib/ \;
 
