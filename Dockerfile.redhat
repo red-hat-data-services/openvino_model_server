@@ -361,6 +361,10 @@ ARG BASE_OS=redhat
 ARG ov_use_binary=0
 ARG FUZZER_BUILD=0
 ARG debug_bazel_flags="--strip=always --define MEDIAPIPE_DISABLE=0 --define PYTHON_DISABLE=0 --config=mp_on_py_on --verbose_failures --//:distro=redhat --local_ram_resources=23552 --local_cpu_resources=16"
+
+#workaround to debug
+RUN find / -name libovms_shared.so 2>/dev/null || echo "Not found"
+
 COPY --from=capi-build /ovms_release/lib/libovms_shared.so /ovms_release/lib/
 COPY create_package.sh /
 RUN ./create_package.sh ; if ! [[ $debug_bazel_flags == *"_py_off"* ]]; then \
