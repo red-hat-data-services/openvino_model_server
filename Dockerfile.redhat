@@ -335,9 +335,21 @@ RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:capi_cpp_example
 RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} //src:capi_benchmark
 
 #RUN find / -type f -name capi_benchmark
-RUN find / \
+#RUN find / \
+#  \( -path /proc -o -path /sys -o -path /dev \) -prune \
+ # -o -type f -name capi_benchmark -print
+
+RUN bazel cquery //src:capi_benchmark --output=starlark \
+  --starlark:expr="target.files.to_list()"
+
+RUN find /root/.cache/bazel/ -type f -name '*capi_benchmark*'
+
+RUN capi_path=$(find / \
   \( -path /proc -o -path /sys -o -path /dev \) -prune \
-  -o -type f -name capi_benchmark -print
+  -o -type f -name capi_benchmark -print | head -n1) && \
+  echo "Found capi_benchmark at: $capi_path" && \
+  chmod +x "$capi_path" && \
+  "$capi_path" --niter 2 --nstreams 1 --servable_name "dummy"
 
 RUN ./bazel-bin/src/capi_benchmark --niter 2 --nstreams 1 --servable_name "dummy"
 # C-api C/C++ app with gcc
