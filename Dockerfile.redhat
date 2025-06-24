@@ -332,24 +332,26 @@ RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared
 RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:capi_cpp_example
 
 # C-API benchmark app
-RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} //src:capi_benchmark
+#RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} //src:capi_benchmark
+
+# Build and run capi_benchmark in one go
+RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} //src:capi_benchmark && \
+    capi_path=$(bazel info bazel-bin)/src/capi_benchmark && \
+    echo "Running binary: $capi_path" && \
+    chmod +x "$capi_path" && \
+    "$capi_path" --niter 2 --nstreams 1 --servable_name "dummy"
+
 
 #RUN find / -type f -name capi_benchmark
 #RUN find / \
 #  \( -path /proc -o -path /sys -o -path /dev \) -prune \
  # -o -type f -name capi_benchmark -print
 
-RUN bazel cquery //src:capi_benchmark --output=starlark \
-  --starlark:expr="target.files.to_list()"
+#RUN bazel cquery //src:capi_benchmark --output=starlark \
+ # --starlark:expr="target.files.to_list()"
 
-RUN find /root/.cache/bazel/ -type f -name '*capi_benchmark*'
+#RUN find /root/.cache/bazel/ -type f -name '*capi_benchmark*'
 
-RUN capi_path=$(find / \
-  \( -path /proc -o -path /sys -o -path /dev \) -prune \
-  -o -type f -name capi_benchmark -print | head -n1) && \
-  echo "Found capi_benchmark at: $capi_path" && \
-  chmod +x "$capi_path" && \
-  "$capi_path" --niter 2 --nstreams 1 --servable_name "dummy"
 
 RUN ./bazel-bin/src/capi_benchmark --niter 2 --nstreams 1 --servable_name "dummy"
 # C-api C/C++ app with gcc
