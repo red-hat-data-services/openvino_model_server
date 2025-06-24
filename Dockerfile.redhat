@@ -342,7 +342,8 @@ RUN pwd && ls -al
 RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} //src:capi_benchmark && \
     echo "WORKDIR at build-time: $PWD" && \
     bazel info bazel-bin && \
-    find $(bazel info bazel-bin)/src -type f -name capi_benchmark
+    find $(bazel info bazel-bin)/src -type f -name capi_benchmark && \
+    find . -name 'libovms_shared.so'
 
 
 RUN mkdir -p /ovms_release/lib/ ; find /ovms/bazel-out/k8-*/bin -iname 'libovms_shared.so'  -exec cp -v {} /ovms_release/lib/ \;
