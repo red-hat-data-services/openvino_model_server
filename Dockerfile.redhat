@@ -327,11 +327,12 @@ ARG CAPI_FLAGS="--strip=always --config=mp_off_py_off --verbose_failures --//:di
 ARG JOBS=16
 RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared
 
-# Copy the shared library after it is built
 RUN echo "Looking for libovms_shared.so..." && \
-    find $(bazel info bazel-bin)/src -name libovms_shared.so && \
+    LIB_PATH=$(find $(bazel info bazel-bin) -type f -name "libovms_shared.so" | head -n1) && \
+    if [ -z "$LIB_PATH" ]; then echo "ERROR: libovms_shared.so not found!" && exit 1; fi && \
+    echo "Found at: $LIB_PATH" && \
     mkdir -p /ovms_release/lib && \
-    cp -v $(bazel info bazel-bin)/src/libovms_shared.so /ovms_release/lib/
+    cp -v "$LIB_PATH" /ovms_release/lib/
 
 
 # C api app with bazel
