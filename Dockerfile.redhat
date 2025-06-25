@@ -346,9 +346,20 @@ RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} //src:capi_benchmark && \
 
 #RUN mkdir -p /ovms_release/lib/ ; find /ovms/bazel-out/k8-*/bin -iname 'libovms_shared.so'  -exec cp -v {} /ovms_release/lib/ \;
 
+#debuggig to find the correct lib file
+
+RUN echo "Looking for .so files in Bazel output..." && \
+    find /ovms/bazel-out/ -type f -name "*.so"
 RUN mkdir -p /ovms_release/lib && \
-    find /ovms/bazel-out/k8-*/bin -iname 'libovms_shared.so' -exec cp -v {} /ovms_release/lib/ \; && \
-    ls -lh /ovms_release/lib/
+    cp /ovms/bazel-out/k8-opt/bin/src/libovms_shared.so /ovms_release/lib/
+RUN ls -lh /ovms_release/lib/
+RUN echo "Contents of /ovms_release/lib before switching stages:" && \
+    ls -l /ovms_release/lib/
+
+
+#RUN mkdir -p /ovms_release/lib && \
+#   find /ovms/bazel-out/k8-*/bin -iname 'libovms_shared.so' -exec cp -v {} /ovms_release/lib/ \; && \
+#    ls -lh /ovms_release/lib/
 
 FROM $BUILD_IMAGE as pkg
 
