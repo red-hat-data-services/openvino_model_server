@@ -327,6 +327,13 @@ ARG CAPI_FLAGS="--strip=always --config=mp_off_py_off --verbose_failures --//:di
 ARG JOBS=16
 RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared
 
+# Copy the shared library after it is built
+RUN echo "Looking for libovms_shared.so..." && \
+    find $(bazel info bazel-bin)/src -name libovms_shared.so && \
+    mkdir -p /ovms_release/lib && \
+    cp -v $(bazel info bazel-bin)/src/libovms_shared.so /ovms_release/lib/
+
+
 # C api app with bazel
 # hadolint ignore=DL3059
 RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:capi_cpp_example
@@ -348,18 +355,6 @@ RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} //src:capi_benchmark && \
 
 #debuggig to find the correct lib file
 
-RUN echo "Looking for .so files in Bazel output..." && \
-    find /ovms/bazel-out/ -type f -name "*.so"
-RUN mkdir -p /ovms_release/lib && \
-    cp /ovms/bazel-out/k8-opt/bin/src/libovms_shared.so /ovms_release/lib/
-RUN ls -lh /ovms_release/lib/
-RUN echo "Contents of /ovms_release/lib before switching stages:" && \
-    ls -l /ovms_release/lib/
-
-
-#RUN mkdir -p /ovms_release/lib && \
-#   find /ovms/bazel-out/k8-*/bin -iname 'libovms_shared.so' -exec cp -v {} /ovms_release/lib/ \; && \
-#    ls -lh /ovms_release/lib/
 
 FROM $BUILD_IMAGE as pkg
 
