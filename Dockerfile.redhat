@@ -327,15 +327,18 @@ ARG CAPI_FLAGS="--strip=always --config=mp_off_py_off --verbose_failures --//:di
 ARG JOBS=16
 RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared
 
-# After building the shared lib
-RUN echo "Looking for libovms_shared.so..." && \
+RUN echo "DEBUG: Resolving Bazel output location..." && \
     BAZEL_BIN=$(bazel info bazel-bin) && \
-    LIB_PATH=$(find -L "$BAZEL_BIN" -type f -name "libovms_shared.so" | head -n1) && \
-    if [ -z "$LIB_PATH" ]; then echo "ERROR: libovms_shared.so not found!" && exit 1; fi && \
-    echo "Found at: $LIB_PATH" && \
+    EXEC_ROOT=$(bazel info execution_root) && \
+    echo "EXEC_ROOT: $EXEC_ROOT" && echo "BAZEL_BIN: $BAZEL_BIN" && \
+    find "$EXEC_ROOT" -type f -name libovms_shared.so && \
+    FULL_PATH="$EXEC_ROOT/bazel-bin/src/libovms_shared.so" && \
+    if [ ! -f "$FULL_PATH" ]; then \
+      echo " File not found: $FULL_PATH"; \
+      exit 1; \
+    fi && \
     mkdir -p /ovms_release/lib && \
-    cp -v "$LIB_PATH" /ovms_release/lib/
-
+    cp -v "$FULL_PATH" /ovms_release/lib/
 
 
 # C api app with bazel
