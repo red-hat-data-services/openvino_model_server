@@ -327,20 +327,18 @@ ARG CAPI_FLAGS="--strip=always --config=mp_off_py_off --verbose_failures --//:di
 ARG JOBS=16
 RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared
 
-RUN echo "DEBUG: Resolving Bazel output paths..." && \
-    OUT_BIN=$(bazel info output_path) && \
-    echo "OUT_BIN: $OUT_BIN" && \
-    LIB_PATH="$OUT_BIN/k8-opt/bin/src/libovms_shared.so" && \
-    echo "Checking path: $LIB_PATH" && \
+RUN echo "🔍 Looking for libovms_shared.so..." && \
+    EXEC_ROOT=$(bazel info execution_root) && \
+    cd "$EXEC_ROOT" && \
+    LIB_PATH="bazel-bin/src/libovms_shared.so" && \
     if [ ! -f "$LIB_PATH" ]; then \
-        echo "ERROR: libovms_shared.so not found at $LIB_PATH"; \
-        find "$OUT_BIN" -type f -name "libovms_shared.so"; \
+        echo "ERROR: libovms_shared.so not found in bazel-bin"; \
+        find bazel-bin -name "libovms_shared.so"; \
         exit 1; \
     fi && \
-    echo "Found libovms_shared.so at: $LIB_PATH" && \
+    echo "Found: $LIB_PATH" && \
     mkdir -p /ovms_release/lib && \
     cp -v "$LIB_PATH" /ovms_release/lib/
-
 
 # C api app with bazel
 # hadolint ignore=DL3059
