@@ -328,14 +328,14 @@ ARG JOBS=16
 RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared
 
 RUN echo "DEBUG: Resolving Bazel output paths..." && \
-    EXEC_ROOT=$(bazel info execution_root) && \
     OUT_BIN=$(bazel info output_path) && \
-    echo "EXEC_ROOT: $EXEC_ROOT" && echo "OUT_BIN: $OUT_BIN" && \
-    LIB_PATH="$EXEC_ROOT/$OUT_BIN/k8-opt/bin/src/libovms_shared.so" && \
+    echo "OUT_BIN: $OUT_BIN" && \
+    LIB_PATH="$OUT_BIN/k8-opt/bin/src/libovms_shared.so" && \
+    echo "Checking path: $LIB_PATH" && \
     if [ ! -f "$LIB_PATH" ]; then \
-      echo "ERROR: libovms_shared.so not found at $LIB_PATH"; \
-      find "$EXEC_ROOT" -type f -name "libovms_shared.so"; \
-      exit 1; \
+        echo "ERROR: libovms_shared.so not found at $LIB_PATH"; \
+        find "$OUT_BIN" -type f -name "libovms_shared.so"; \
+        exit 1; \
     fi && \
     echo "Found libovms_shared.so at: $LIB_PATH" && \
     mkdir -p /ovms_release/lib && \
