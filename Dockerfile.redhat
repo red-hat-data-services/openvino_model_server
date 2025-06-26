@@ -327,18 +327,22 @@ ARG CAPI_FLAGS="--strip=always --config=mp_off_py_off --verbose_failures --//:di
 ARG JOBS=16
 RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared
 
-RUN echo "Resolving path to libovms_shared.so using Bazel cquery..." && \
+RUN echo "Building and copying libovms_shared.so..." && \
+    bazel build --jobs=$JOBS ${CAPI_FLAGS} //src:ovms_shared && \
     REL_PATH=$(bazel cquery //src:ovms_shared --output=starlark --starlark:expr="target.files.to_list()[0].path") && \
     EXEC_ROOT=$(bazel info execution_root) && \
     ABS_PATH="${EXEC_ROOT}/${REL_PATH}" && \
-    echo "Absolute path resolved: $ABS_PATH" && \
+    echo "Expected path: $ABS_PATH" && \
     if [ ! -f "$ABS_PATH" ]; then \
-        echo "ERROR: libovms_shared.so not found at $ABS_PATH"; \
+        echo "libovms_shared.so not found at expected location: $ABS_PATH"; \
+        echo "Dumping surrounding contents for debug:"; \
+        ls -lR "$(dirname "$ABS_PATH")"; \
+        echo "Dumping fallback full Bazel bin:"; \
+        find /root/.cache/bazel/ -name 'libovms_shared.so'; \
         exit 1; \
     fi && \
     mkdir -p /ovms_release/lib && \
     cp -v "$ABS_PATH" /ovms_release/lib/
-
 
 # C api app with bazel
 # hadolint ignore=DL3059
