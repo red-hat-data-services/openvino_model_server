@@ -328,12 +328,18 @@ ARG JOBS=16
 #RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared
 RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} --subcommands //src:ovms_shared
 
+#debugging
+RUN echo "Attempting to locate libovms_shared.so:"
+RUN bazel info bazel-bin
+RUN find $(bazel info bazel-bin) -type f -name 'libovms_shared.so'
+#end
+
 # C api app with bazel
 # hadolint ignore=DL3059
 RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:capi_cpp_example
 
 # C-API benchmark app
-#RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} //src:capi_benchmark
+RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} //src:capi_benchmark
 
 #workaround for debugging
 #RUN find /root/.cache/bazel/ -type f -name '*capi_benchmark*'
@@ -345,7 +351,8 @@ RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} //src:capi_benchmark && \
     bazel info bazel-bin && \
     find $(bazel info bazel-bin)/src -type f -name capi_benchmark
 
-RUN mkdir -p /ovms_release/lib/ ; find /ovms/bazel-out/k8-*/bin -iname 'libovms_shared.so'  -exec cp -v {} /ovms_release/lib/ \;
+#RUN mkdir -p /ovms_release/lib/ ; find /ovms/bazel-out/k8-*/bin -iname 'libovms_shared.so'  -exec cp -v {} /ovms_release/lib/ \;
+RUN mkdir -p /ovms_release/lib/ ; find $(bazel info bazel-bin) -iname 'libovms_shared.so' -exec cp -v {} /ovms_release/lib/ \;
 
 #debuggig to find the correct lib file
 
