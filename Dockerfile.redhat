@@ -333,9 +333,7 @@ RUN set -x && \ # Enable shell debugging for visibility
     EXEC_ROOT=$(bazel info execution_root) && \
     echo "Bazel Execution Root: $EXEC_ROOT" && \
     echo "Listing contents of execution root for libovms_shared.so:" && \
-    # List all files named libovms_shared.so under the execution root
     find "$EXEC_ROOT" -type f -name 'libovms_shared.so' -print && \
-    # Capture the path of the found file
     LIB_PATH=$(find "$EXEC_ROOT" -type f -name 'libovms_shared.so' -print -quit) && \
     if [ -z "$LIB_PATH" ]; then \
         echo "ERROR: libovms_shared.so was not found by 'find' under the execution root." && exit 1; \
