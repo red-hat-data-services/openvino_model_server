@@ -329,7 +329,7 @@ ARG JOBS=16
 RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} --subcommands //src:ovms_shared
 
 # DIRECT INSPECTION AND COPY
-RUN set -x && \ # Enable shell debugging for visibility
+RUN set -x && \
     EXEC_ROOT=$(bazel info execution_root) && \
     echo "Bazel Execution Root: $EXEC_ROOT" && \
     echo "Listing contents of execution root for libovms_shared.so:" && \
