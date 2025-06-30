@@ -328,16 +328,30 @@ ARG JOBS=16
 #RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared
 RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} --subcommands //src:ovms_shared
 
+# DIRECT INSPECTION AND COPY
+RUN set -x && \ # Enable shell debugging for visibility
+    EXEC_ROOT=$(bazel info execution_root) && \
+    echo "Bazel Execution Root: $EXEC_ROOT" && \
+    echo "Listing contents of execution root for libovms_shared.so:" && \
+    # List all files named libovms_shared.so under the execution root
+    find "$EXEC_ROOT" -type f -name 'libovms_shared.so' -print && \
+    # Capture the path of the found file
+    LIB_PATH=$(find "$EXEC_ROOT" -type f -name 'libovms_shared.so' -print -quit) && \
+    if [ -z "$LIB_PATH" ]; then \
+        echo "ERROR: libovms_shared.so was not found by 'find' under the execution root." && exit 1; \
+    fi && \
+    echo "Identified path for libovms_shared.so: $LIB_PATH" && \
+    mkdir -p /ovms_release/lib/ && \
+    cp "$LIB_PATH" /ovms_release/lib/ && \
+    echo "Contents of /ovms_release/lib/ after copy:" && \
+    ls -al /ovms_release/lib/
+# END
+
 #debugging
 RUN echo "Attempting to locate libovms_shared.so:"
 RUN bazel info bazel-bin
-RUN find $(bazel info bazel-bin) -type f -name 'libovms_shared.so'
+#RUN find $(bazel info bazel-bin) -type f -name 'libovms_shared.so'
 #end
-
-
-#copy
-RUN mkdir -p /ovms_release/lib/ && \
-    cp $(bazel info bazel-bin)/src/libovms_shared.so /ovms_release/lib/
 
 
 # C api app with bazel
