@@ -334,6 +334,12 @@ RUN bazel info bazel-bin
 RUN find $(bazel info bazel-bin) -type f -name 'libovms_shared.so'
 #end
 
+
+#copy
+RUN mkdir -p /ovms_release/lib/ && \
+    cp $(bazel info bazel-bin)/src/libovms_shared.so /ovms_release/lib/
+
+
 # C api app with bazel
 # hadolint ignore=DL3059
 RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:capi_cpp_example
@@ -344,6 +350,8 @@ RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} //src:capi_benchmark
 #workaround for debugging
 #RUN find /root/.cache/bazel/ -type f -name '*capi_benchmark*'
 
+RUN ls -al /ovms_release/lib/
+
 RUN pwd && ls -al
 
 RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} //src:capi_benchmark && \
@@ -352,7 +360,7 @@ RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} //src:capi_benchmark && \
     find $(bazel info bazel-bin)/src -type f -name capi_benchmark
 
 #RUN mkdir -p /ovms_release/lib/ ; find /ovms/bazel-out/k8-*/bin -iname 'libovms_shared.so'  -exec cp -v {} /ovms_release/lib/ \;
-RUN mkdir -p /ovms_release/lib/ ; find $(bazel info bazel-bin) -iname 'libovms_shared.so' -exec cp -v {} /ovms_release/lib/ \;
+#RUN mkdir -p /ovms_release/lib/ ; find $(bazel info bazel-bin) -iname 'libovms_shared.so' -exec cp -v {} /ovms_release/lib/ \;
 
 #debuggig to find the correct lib file
 
