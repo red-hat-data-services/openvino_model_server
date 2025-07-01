@@ -332,8 +332,23 @@ RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} --subcommands //src:ovms_shared
 RUN ls -l bazel-bin
 RUN set -ex && \
     mkdir -p /ovms_release/lib/ && \
-    echo "Attempting to copy from: $(pwd)/bazel-bin/src/libovms_shared.so" && \
-    cp bazel-bin/src/libovms_shared.so /ovms_release/lib/ && \
+    # Get the absolute path that bazel-bin points to
+    BAZEL_BIN_RESOLVED_PATH=$(readlink bazel-bin) && \
+    echo "Resolved bazel-bin symlink to: $BAZEL_BIN_RESOLVED_PATH" && \
+    # Construct the full absolute path to the .so file
+    # Append '/src/libovms_shared.so' to the resolved path of bazel-bin
+    FULL_LIB_PATH="${BAZEL_BIN_RESOLVED_PATH}/src/libovms_shared.so" && \
+    echo "Attempting to copy from exact absolute path: $FULL_LIB_PATH" && \
+    # Verify existence of the file at this absolute path BEFORE copying
+    if [ ! -f "$FULL_LIB_PATH" ]; then \
+        echo "ERROR: File '$FULL_LIB_PATH' does NOT exist! Something is wrong with Bazel's output location." && \
+        # This last-ditch find is crucial if the direct path still fails
+        echo "Performing broad search for libovms_shared.so from /" && \
+        find / -name 'libovms_shared.so' 2>/dev/null || echo "No libovms_shared.so found anywhere after build." && \
+        exit 1; \
+    fi && \
+    # Perform the copy using the guaranteed absolute path
+    cp "$FULL_LIB_PATH" /ovms_release/lib/ && \
     echo "Contents of /ovms_release/lib/ after copy:" && \
     ls -al /ovms_release/lib/
 
