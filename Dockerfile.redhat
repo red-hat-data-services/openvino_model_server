@@ -341,7 +341,7 @@ RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} //src:capi_benchmark
 #workaround for debugging
 #RUN find /root/.cache/bazel/ -type f -name '*capi_benchmark*'
 
-RUN ls -al /ovms_release/lib/
+#RUN ls -al /ovms_release/lib/
 
 RUN pwd && ls -al
 
