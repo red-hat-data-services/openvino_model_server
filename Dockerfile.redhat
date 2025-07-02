@@ -326,39 +326,10 @@ FROM $BUILD_IMAGE as capi-build
 ARG CAPI_FLAGS="--strip=always --config=mp_off_py_off --verbose_failures --//:distro=redhat --local_ram_resources=23552 --local_cpu_resources=16 --subcommands"
 ARG JOBS=16
 #RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared
-RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} --subcommands //src:ovms_shared
-
-#another try
-RUN ls -l bazel-bin
-RUN set -ex && \
-    mkdir -p /ovms_release/lib/ && \
-    # Get the absolute path that bazel-bin points to
-    BAZEL_BIN_RESOLVED_PATH=$(readlink bazel-bin) && \
-    echo "Resolved bazel-bin symlink to: $BAZEL_BIN_RESOLVED_PATH" && \
-    # Construct the full absolute path to the .so file
-    # Append '/src/libovms_shared.so' to the resolved path of bazel-bin
-    FULL_LIB_PATH="${BAZEL_BIN_RESOLVED_PATH}/src/libovms_shared.so" && \
-    echo "Attempting to copy from exact absolute path: $FULL_LIB_PATH" && \
-    # Verify existence of the file at this absolute path BEFORE copying
-    if [ ! -f "$FULL_LIB_PATH" ]; then \
-        echo "ERROR: File '$FULL_LIB_PATH' does NOT exist! Something is wrong with Bazel's output location." && \
-        # This last-ditch find is crucial if the direct path still fails
-        echo "Performing broad search for libovms_shared.so from /" && \
-        find / -name 'libovms_shared.so' 2>/dev/null || echo "No libovms_shared.so found anywhere after build." && \
-        exit 1; \
-    fi && \
-    # Perform the copy using the guaranteed absolute path
-    cp "$FULL_LIB_PATH" /ovms_release/lib/ && \
-    echo "Contents of /ovms_release/lib/ after copy:" && \
-    ls -al /ovms_release/lib/
-
-
-#debugging
-RUN echo "Attempting to locate libovms_shared.so:"
-RUN bazel info bazel-bin
-#RUN find $(bazel info bazel-bin) -type f -name 'libovms_shared.so'
-#end
-
+#RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} --subcommands //src:ovms_shared
+RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} --subcommands --verbose_failures --ui_event_filters=-info,-debug,-warning --genrule_strategy=standalone --spawn_strategy=standalone //src:ovms_shared
+RUN bazel info output_base
+RUN ls -lR $(bazel info output_base)
 
 # C api app with bazel
 # hadolint ignore=DL3059
@@ -379,7 +350,7 @@ RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} //src:capi_benchmark && \
     bazel info bazel-bin && \
     find $(bazel info bazel-bin)/src -type f -name capi_benchmark
 
-#RUN mkdir -p /ovms_release/lib/ ; find /ovms/bazel-out/k8-*/bin -iname 'libovms_shared.so'  -exec cp -v {} /ovms_release/lib/ \;
+RUN mkdir -p /ovms_release/lib/ ; find /ovms/bazel-out/k8-*/bin -iname 'libovms_shared.so'  -exec cp -v {} /ovms_release/lib/ \;
 #RUN mkdir -p /ovms_release/lib/ ; find $(bazel info bazel-bin) -iname 'libovms_shared.so' -exec cp -v {} /ovms_release/lib/ \;
 
 #debuggig to find the correct lib file
