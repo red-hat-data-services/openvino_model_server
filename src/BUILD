@@ -137,17 +137,6 @@ cc_shared_library(
     ],
 )
 
-genrule(
-    name = "extract_ovms_shared",
-    srcs = [":ovms_shared"],
-    outs = ["libovms_shared_copy.so"],
-    cmd = """
-        find bazel-out/ -name 'libovms_shared.so' -exec cp -v {} $@ \;
-    """,
-    visibility = ["//visibility:public"],
-)
-
-
 load("@mediapipe//mediapipe/framework/port:build_config.bzl", "mediapipe_cc_proto_library", "mediapipe_proto_library")
 
 mediapipe_proto_library(
@@ -3110,3 +3099,12 @@ filegroup(
     "//src:capi_cpp_example"
   ]
 )
+
+genrule(
+    name = "extract_ovms_shared",
+    srcs = [":ovms_shared"],
+    outs = ["libovms_shared_copy.so"],
+    cmd = "cp $(location :ovms_shared) $@",
+    visibility = ["//visibility:public"],
+)
+
