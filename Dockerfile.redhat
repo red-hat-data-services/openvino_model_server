@@ -327,9 +327,13 @@ ARG CAPI_FLAGS="--strip=always --config=mp_off_py_off --verbose_failures --//:di
 ARG JOBS=16
 #RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared
 #RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} --subcommands //src:ovms_shared
-RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} --subcommands --verbose_failures --ui_event_filters=-info,-debug,-warning --genrule_strategy=standalone --spawn_strategy=standalone //src:ovms_shared
-RUN bazel info output_base
-RUN ls -lR $(bazel info output_base)
+
+RUN echo "Building shared lib via extract_ovms_shared..." && \
+    bazel build ${CAPI_FLAGS} //src:extract_ovms_shared && \
+    mkdir -p /ovms_release/lib && \
+    cp -v bazel-bin/src/libovms_shared_copy.so /ovms_release/lib/
+
+
 
 # C api app with bazel
 # hadolint ignore=DL3059
