@@ -328,10 +328,16 @@ ARG JOBS=16
 #RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared
 #RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} --subcommands //src:ovms_shared
 
-RUN echo "Building shared lib via extract_ovms_shared..." && \
+RUN echo "Building and copying libovms_shared_copy.so..." && \
     bazel build ${CAPI_FLAGS} //src:extract_ovms_shared && \
+    REL_PATH=$(bazel cquery //src:extract_ovms_shared --output=starlark \
+        --starlark:expr="target.files.to_list()[0].path") && \
+    EXEC_ROOT=$(bazel info execution_root) && \
+    ABS_PATH="${EXEC_ROOT}/${REL_PATH}" && \
+    echo "Copying: $ABS_PATH" && \
+    test -f "$ABS_PATH" || { echo "File not found: $ABS_PATH"; exit 1; } && \
     mkdir -p /ovms_release/lib && \
-    cp -v $(bazel info bazel-bin)/src/libovms_shared_copy.so /ovms_release/lib/
+    cp -v "$ABS_PATH" /ovms_release/lib/
 
 
 # C api app with bazel
