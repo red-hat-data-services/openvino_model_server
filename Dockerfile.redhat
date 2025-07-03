@@ -327,10 +327,9 @@ ARG CAPI_FLAGS="--strip=always --config=mp_off_py_off --verbose_failures --//:di
 ARG JOBS=16
 #RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared
 
-RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} --subcommands //src:ovms_shared
-RUN bazel cquery //src:extract_ovms_shared --output=starlark --starlark:expr="target.files.to_list()"
-RUN ls -l bazel-bin/src/libovms_shared_copy.so
-RUN ls -l bazel-out/k8-opt/bin/src/libovms_shared_copy.so
+#RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} --subcommands //src:ovms_shared
+RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared --verbose_failures
+RUN ls -l bazel-bin/src/ovms_shared/
 
 # C api app with bazel
 # hadolint ignore=DL3059
