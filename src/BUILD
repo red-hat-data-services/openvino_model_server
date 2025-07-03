@@ -3104,7 +3104,7 @@ genrule(
     name = "extract_ovms_shared",
     srcs = [":ovms_shared"],
     outs = ["libovms_shared_copy.so"],
-    cmd = "cp $(location :ovms_shared) $@",
-    tags = ["no-cache"], 
+    cmd = "cp $(location ovms_shared) $@",
+    output_to_bindir = True,
     visibility = ["//visibility:public"],
 )
