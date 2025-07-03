@@ -329,7 +329,11 @@ ARG JOBS=16
 
 #RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} --subcommands //src:ovms_shared
 RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared --verbose_failures
-RUN ls -l bazel-bin/src/ovms_shared/
+RUN ls -l bazel-bin/src/
+RUN mkdir -p /ovms_release/lib/
+RUN ls -l /ovms_release/lib/
+RUN cp bazel-bin/src/libovms_shared.so /ovms_release/lib/
+RUN ls -l /ovms_release/lib/
 
 # C api app with bazel
 # hadolint ignore=DL3059
