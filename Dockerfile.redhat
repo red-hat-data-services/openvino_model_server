@@ -328,8 +328,9 @@ ARG JOBS=16
 #RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared
 #RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} --subcommands //src:ovms_shared
 
-RUN bazel clean --expunge && \
+RUN echo "Building shared lib via extract_ovms_shared..." && \
     bazel build ${CAPI_FLAGS} //src:extract_ovms_shared && \
+    mkdir -p /ovms_release/lib && \
     cp -v $(bazel info bazel-bin)/src/libovms_shared_copy.so /ovms_release/lib/
 
 
