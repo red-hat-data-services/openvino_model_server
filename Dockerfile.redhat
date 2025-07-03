@@ -326,24 +326,11 @@ FROM $BUILD_IMAGE as capi-build
 ARG CAPI_FLAGS="--strip=always --config=mp_off_py_off --verbose_failures --//:distro=redhat --local_ram_resources=23552 --local_cpu_resources=16 --subcommands"
 ARG JOBS=16
 #RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared
-#RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} --subcommands //src:ovms_shared
 
-RUN echo "Forcing rebuild with debug..." && \
-    bazel clean --expunge && \
-    bazel build \
-        --sandbox_debug \
-        --spawn_strategy=standalone \
-        --noexperimental_run_validations \
-        ${CAPI_FLAGS} //src:extract_ovms_shared && \
-    REL_PATH=$(bazel cquery //src:extract_ovms_shared --output=starlark \
-        --starlark:expr="target.files.to_list()[0].path") && \
-    EXEC_ROOT=$(bazel info execution_root) && \
-    ABS_PATH="${EXEC_ROOT}/${REL_PATH}" && \
-    echo "Copying from: $ABS_PATH" && \
-    test -f "$ABS_PATH" || { echo "File not found: $ABS_PATH"; exit 1; } && \
-    mkdir -p /ovms_release/lib && \
-    cp -v "$ABS_PATH" /ovms_release/lib/
-
+RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} --subcommands //src:ovms_shared
+RUN bazel cquery //src:extract_ovms_shared --output=starlark --starlark:expr="target.files.to_list()"
+RUN ls -l bazel-bin/src/libovms_shared_copy.so
+RUN ls -l bazel-out/k8-opt/bin/src/libovms_shared_copy.so
 
 # C api app with bazel
 # hadolint ignore=DL3059
