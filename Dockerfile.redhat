@@ -324,13 +324,10 @@ FROM $BUILD_IMAGE as capi-build
 # C api shared library
 ARG CAPI_FLAGS="--strip=always --config=mp_off_py_off --verbose_failures --//:distro=redhat --local_ram_resources=23552 --local_cpu_resources=16 --subcommands"
 ARG JOBS=16
-#RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared
-
-#RUN bazel build --jobs=$JOBS ${CAPI_FLAGS} --subcommands //src:ovms_shared
-RUN bazel clean
-RUN bazel build //src:ovms_shared && cp bazel-bin/src/libovms_shared.so /ovms_release/lib/
+RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared
 RUN ls -l bazel-bin/src/
-RUN ls -l bazel-bin/src/libovms_shared.so
+RUN cp -v $(bazel info bazel-bin)/src/libovms_shared_real.so /ovms_release/lib/
+
 
 # C api app with bazel
 # hadolint ignore=DL3059
