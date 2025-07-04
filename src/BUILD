@@ -3101,7 +3101,7 @@ filegroup(
 )
 
 cc_binary(
-    name = "libovms_shared_real",
+    name = "ovms_shared",
     srcs = [],
     deps = [":ovms_shared"],
     linkshared = 1,
