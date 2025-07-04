@@ -3100,3 +3100,11 @@ filegroup(
   ]
 )
 
+cc_binary(
+    name = "libovms_shared_real",
+    srcs = [],
+    deps = [":ovms_shared"],
+    linkshared = 1,
+    visibility = ["//visibility:public"],
+)
+
