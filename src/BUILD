@@ -1085,11 +1085,11 @@ cc_binary(
 )
 
 # Use for dynamic linking when necessary
-cc_import(
-  name = "shared_lib",
-  hdrs = ["ovms.h"],
-  shared_library = "ovms_shared",
-)
+#cc_import(
+#  name = "shared_lib",
+#  hdrs = ["ovms.h"],
+#  shared_library = "ovms_shared",
+#)
 
 cc_library(
     name = "tfs_utils",
