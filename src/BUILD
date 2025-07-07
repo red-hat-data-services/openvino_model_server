@@ -3100,11 +3100,3 @@ filegroup(
   ]
 )
 
-cc_binary(
-    name = "ovms_shared",
-    srcs = [],
-    deps = [":ovms_shared"],
-    linkshared = 1,
-    visibility = ["//visibility:public"],
-)
-
