@@ -323,9 +323,12 @@ FROM $BUILD_IMAGE as capi-build
 # C api shared library
 ARG CAPI_FLAGS="--strip=always --config=mp_off_py_off --verbose_failures --//:distro=redhat --local_ram_resources=23552 --local_cpu_resources=16 --subcommands"
 ARG JOBS=16
+
+#RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared
+
 RUN echo "Building ovms_shared_bin" && \
     df -h && \
-    bazel build ${CAPI_FLAGS} //src:ovms_shared_bin && \
+    bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared
     echo "Current directory:" && pwd && \
     echo "Contents of bazel-bin/src:" && ls -l $(bazel info bazel-bin)/src && \
     echo "Full Bazel output tree:" && find $(bazel info bazel-bin)/src -name 'ovms_shared_bin' && \
