@@ -1085,11 +1085,11 @@ cc_binary(
 )
 
 # Use for dynamic linking when necessary
-#cc_import(
-#  name = "shared_lib",
-#  hdrs = ["ovms.h"],
-#  shared_library = "ovms_shared",
-#)
+cc_import(
+  name = "shared_lib",
+  hdrs = ["ovms.h"],
+  shared_library = "ovms_shared",
+)
 
 cc_library(
     name = "tfs_utils",
@@ -3099,12 +3099,3 @@ filegroup(
     "//src:capi_cpp_example"
   ]
 )
-
-cc_binary(
-    name = "ovms_shared_bin",
-    deps = [":ovms_shared"],
-    linkshared = 1,
-    linkstatic = 0,
-    visibility = ["//visibility:public"],
-)
-
