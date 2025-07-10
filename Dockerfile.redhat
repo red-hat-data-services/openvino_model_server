@@ -328,7 +328,7 @@ ARG JOBS=16
 
 RUN echo "Building ovms_shared_bin" && \
     df -h && \
-    bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared
+    bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared && \
     echo "Current directory:" && pwd && \
     echo "Contents of bazel-bin/src:" && ls -l $(bazel info bazel-bin)/src && \
     echo "Full Bazel output tree:" && find $(bazel info bazel-bin)/src -name 'ovms_shared_bin' && \
