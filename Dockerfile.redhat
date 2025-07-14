@@ -326,11 +326,16 @@ ARG JOBS=16
 
 #RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared
 
-RUN echo "Building shared lib and copying output dir..." && \
+RUN echo "Building shared lib" && \
     bazel build ${CAPI_FLAGS} //src:ovms_shared && \
+    FILE=$(readlink -f bazel-bin/src/libovms_shared.so) && \
+    echo "Resolved path: $FILE" && \
     mkdir -p /ovms_release/lib && \
-    cp -av bazel-bin/src /ovms_release/lib/ && \
-    find /ovms_release/lib/src -name '*ovms_shared*'
+    cp -v "$FILE" /ovms_release/lib/
+
+
+RUN find $(bazel info output_base) -name 'libovms_shared.so'
+
 
 # C api app with bazel
 # hadolint ignore=DL3059
