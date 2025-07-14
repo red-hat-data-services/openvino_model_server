@@ -326,17 +326,11 @@ ARG JOBS=16
 
 #RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared
 
-RUN echo "Building ovms_shared_bin" && \
-    df -h && \
-    bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared && \
-    df -h && \
-    find bazel-bin -name 'libovms_shared.so' && \
-    echo "Current directory:" && pwd && \
-    echo "Contents of bazel-bin/src:" && ls -l $(bazel info bazel-bin)/src && \
-    echo "Full Bazel output tree:" && find $(bazel info bazel-bin)/src -name 'ovms_shared_bin' && \
+RUN echo "Building shared lib and copying output dir..." && \
+    bazel build ${CAPI_FLAGS} //src:ovms_shared && \
     mkdir -p /ovms_release/lib && \
-    cp -v $(bazel info bazel-bin)/src/ovms_shared_bin /ovms_release/lib/libovms_shared.so
-
+    cp -av bazel-bin/src /ovms_release/lib/ && \
+    RUN find /ovms_release/lib/src -name '*ovms_shared*'
 
 # C api app with bazel
 # hadolint ignore=DL3059
