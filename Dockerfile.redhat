@@ -330,7 +330,7 @@ RUN echo "Building shared lib and copying output dir..." && \
     bazel build ${CAPI_FLAGS} //src:ovms_shared && \
     mkdir -p /ovms_release/lib && \
     cp -av bazel-bin/src /ovms_release/lib/ && \
-    RUN find /ovms_release/lib/src -name '*ovms_shared*'
+    find /ovms_release/lib/src -name '*ovms_shared*'
 
 # C api app with bazel
 # hadolint ignore=DL3059
