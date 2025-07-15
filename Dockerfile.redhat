@@ -326,11 +326,31 @@ ARG JOBS=16
 
 #RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared
 
-RUN echo "Building shared lib and copying output dir..." && \
+RUN echo "Building ovms_shared..." && \
     bazel build ${CAPI_FLAGS} //src:ovms_shared && \
+    echo "Listing bazel-bin/src:" && \
+    ls -lh $(bazel info bazel-bin)/src || echo "bazel-bin/src missing" && \
+    echo "Looking for actual output path:" && \
+    REAL_PATH=$(bazel cquery //src:ovms_shared --output=starlark --starlark:expr="target.files.to_list()[0].path") && \
+    echo "🔍 Found relative path: $REAL_PATH" && \
+    EXEC_ROOT=$(bazel info execution_root) && \
+    ABS_PATH="${EXEC_ROOT}/${REAL_PATH}" && \
+    echo "Resolved full path: $ABS_PATH" && \
+    if [ -f "$ABS_PATH" ]; then \
+      echo "File exists at $ABS_PATH"; \
+    else \
+      echo "File does NOT exist at $ABS_PATH"; \
+      echo "Dumping full output tree for inspection:"; \
+      find ${EXEC_ROOT}/bazel-out -name '*ovms_shared*.so' -ls || echo "Nothing found"; \
+      exit 1; \
+    fi && \
     mkdir -p /ovms_release/lib && \
-    cp -v bazel-bin/src/libovms_shared.so /ovms_release/lib/libovms_shared.so && \
-    ls -lh /ovms_release/lib/
+    cp -v --dereference "$ABS_PATH" /ovms_release/lib/libovms_shared.so && \
+    echo "Final contents of /ovms_release/lib:" && \
+    ls -lh /ovms_release/lib/ && \
+    echo "🗂Symlink check in bazel-bin:" && \
+    find bazel-bin/src -type l -exec ls -lh {} \; || echo "No symlinks found"
+
 
 
 # C api app with bazel
