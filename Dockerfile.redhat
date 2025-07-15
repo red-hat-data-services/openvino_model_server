@@ -331,7 +331,9 @@ RUN mkdir -p /tmp/bazel-output && \
           build //src:ovms_shared && \
     find /tmp/bazel-output -name libovms_shared.so && \
     LIB_PATH=$(find /tmp/bazel-output -name libovms_shared.so | head -n1) && \
-    cp -v $(find /tmp/bazel-output -name libovms_shared.so | head -n1) /ovms_release/lib/
+    echo "Found built file: $LIB_PATH" && \
+    mkdir -p /ovms_release/lib && \
+    cp -v "$LIB_PATH" /ovms_release/lib/
 
 
 # C api app with bazel
