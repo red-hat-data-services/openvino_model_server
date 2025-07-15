@@ -336,7 +336,16 @@ FROM $BUILD_IMAGE as capi-build
 # C api shared library
 ARG CAPI_FLAGS="--strip=always  --config=mp_off_py_off --//:distro=redhat"
 ARG JOBS=40
-RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared
+#RUN bazel build --jobs $JOBS ${CAPI_FLAGS} //src:ovms_shared
+
+RUN mkdir -p /tmp/bazel-output && \
+    bazel --output_base=/tmp/bazel-output \
+          build //src:ovms_shared && \
+    find /tmp/bazel-output -name libovms_shared.so && \
+    LIB_PATH=$(find /tmp/bazel-output -name libovms_shared.so | head -n1) && \
+    echo "Found built file: $LIB_PATH" && \
+    mkdir -p /ovms_release/lib && \
+    cp -v "$LIB_PATH" /ovms_release/lib/
 
 # C api app with bazel
 # hadolint ignore=DL3059
