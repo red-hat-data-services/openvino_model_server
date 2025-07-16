@@ -115,8 +115,8 @@ ARG BASE_IMAGE=registry.access.redhat.com/ubi9/ubi:9.6
 SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
 
 ARG JOBS=16
-ARG VERBOSE_LOGS=ON
-ARG LTO_ENABLE=ON
+ARG VERBOSE_LOGS=OFF
+ARG LTO_ENABLE=OFF
 
 # hadolint ignore=DL3041
 RUN dnf install -y https://rpmfind.net/linux/almalinux/8.10/PowerTools/x86_64/os/Packages/opencl-headers-2.2-1.20180306gite986688.el8.noarch.rpm && \
