@@ -26,16 +26,13 @@ SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
 
 ARG JOBS=16
 ARG VERBOSE_LOGS=ON
-#ARG LTO_ENABLE=ON
-#ARG LTO_CXX_FLAGS="-flto=auto -ffat-lto-objects -march=haswell"
-#ARG LTO_LD_FLAGS="-flto=auto -ffat-lto-objects"
-#RUN echo "$LTO_CXX_FLAGS"
-#ARG LTO_CXX_FLAGS=-flto=auto\ -ffat-lto-objects\ -march=haswell
-#RUN echo "$LTO_CXX_FLAGS"
+ARG LTO_ENABLE=ON
+ARG LTO_CXX_FLAGS="-flto=auto -ffat-lto-objects -march=haswell"
+ARG LTO_LD_FLAGS="-flto=auto -ffat-lto-objects"
 
-ARG LTO_ENABLE=OFF
-ARG LTO_CXX_FLAGS=""
-ARG LTO_LD_FLAGS="-Wl,-z,relro"
+#ARG LTO_ENABLE=OFF
+#ARG LTO_CXX_FLAGS=""
+#ARG LTO_LD_FLAGS="-Wl,-z,relro"
 
 # hadolint ignore=DL3041
 RUN echo -e "max_parallel_downloads=8\nretries=50" >> /etc/dnf/dnf.conf && \
@@ -115,8 +112,8 @@ ARG BASE_IMAGE=registry.access.redhat.com/ubi9/ubi:9.6
 SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
 
 ARG JOBS=16
-ARG VERBOSE_LOGS=OFF
-ARG LTO_ENABLE=OFF
+ARG VERBOSE_LOGS=ON
+ARG LTO_ENABLE=ON
 
 # hadolint ignore=DL3041
 RUN dnf install -y https://rpmfind.net/linux/almalinux/8.10/PowerTools/x86_64/os/Packages/opencl-headers-2.2-1.20180306gite986688.el8.noarch.rpm && \
@@ -198,7 +195,16 @@ COPY openvino-lto.patch .
 RUN if [ "$ov_use_binary" == "0" ]; then patch -p1 < openvino-lto.patch ; rm -f openvino-lto.patch ; fi
 WORKDIR /openvino/build
 RUN if [ "$ov_use_binary" == "0" ] && [[ $debug_bazel_flags == *"PYTHON_DISABLE=1"* ]]; then true ; else exit 0 ; fi ; if ! [[ $debug_bazel_flags == *"PYTHON_DISABLE=1"* ]]; then true ; else exit 0 ; fi ; cmake -DCMAKE_BUILD_TYPE=$CMAKE_BUILD_TYPE -DCMAKE_VERBOSE_MAKEFILE="${VERBOSE_LOGS}" -DENABLE_LTO=${LTO_ENABLE} -DENABLE_PYTHON=ON -DENABLE_INTEL_NPU=OFF -DENABLE_SAMPLES=0 -DCMAKE_CXX_FLAGS=" -Wno-error=parentheses  ${LTO_CXX_FLAGS} " -DCMAKE_SHARED_LINKER_FLAGS="${LTO_LD_FLAGS}" ..
-RUN if [ "$ov_use_binary" == "0" ] ; then true ; else exit 0 ; fi ; cmake -DCMAKE_BUILD_TYPE="$CMAKE_BUILD_TYPE" -DCMAKE_VERBOSE_MAKEFILE="${VERBOSE_LOGS}" -DENABLE_LTO=${LTO_ENABLE} -DENABLE_SAMPLES=0 -DENABLE_INTEL_NPU=OFF -DCMAKE_CXX_FLAGS=" -Wno-error=parentheses ${LTO_CXX_FLAGS} " -DCMAKE_SHARED_LINKER_FLAGS="${LTO_LD_FLAGS}" ..
+#RUN if [ "$ov_use_binary" == "0" ] ; then true ; else exit 0 ; fi ; cmake -DCMAKE_BUILD_TYPE="$CMAKE_BUILD_TYPE" -DCMAKE_VERBOSE_MAKEFILE="${VERBOSE_LOGS}" -DENABLE_LTO=${LTO_ENABLE} -DENABLE_SAMPLES=0 -DENABLE_INTEL_NPU=OFF -DCMAKE_CXX_FLAGS=" -Wno-error=parentheses ${LTO_CXX_FLAGS} " -DCMAKE_SHARED_LINKER_FLAGS="${LTO_LD_FLAGS}" ..
+RUN if [ "$ov_use_binary" == "0" ] ; then true ; else exit 0 ; fi ; cmake \
+  -DCMAKE_BUILD_TYPE="$CMAKE_BUILD_TYPE" \
+  -DCMAKE_VERBOSE_MAKEFILE="${VERBOSE_LOGS}" \
+  -DENABLE_LTO=${LTO_ENABLE} \
+  -DENABLE_SAMPLES=0 \
+  -DENABLE_INTEL_NPU=OFF \
+  -DCMAKE_CXX_FLAGS="-Wno-error=parentheses -flto -ffat-lto-objects -march=haswell" \
+  -DCMAKE_SHARED_LINKER_FLAGS="-flto -ffat-lto-objects" \
+
 RUN if [ "$ov_use_binary" == "0" ] ; then true ; else exit 0 ; fi ; make --jobs=$JOBS
 RUN if [ "$ov_use_binary" == "0" ] ; then true ; else exit 0 ; fi ; make install
 RUN if [ "$ov_use_binary" == "0" ] ; then true ; else exit 0 ; fi ; \
