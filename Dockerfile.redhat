@@ -29,6 +29,9 @@ ARG VERBOSE_LOGS=ON
 ARG LTO_ENABLE=ON
 ARG LTO_CXX_FLAGS="-flto=auto -ffat-lto-objects -march=haswell"
 ARG LTO_LD_FLAGS="-flto=auto -ffat-lto-objects"
+RUN echo "$LTO_CXX_FLAGS"
+ARG LTO_CXX_FLAGS=-flto=auto\ -ffat-lto-objects\ -march=haswell
+RUN echo "$LTO_CXX_FLAGS"
 
 # hadolint ignore=DL3041
 RUN echo -e "max_parallel_downloads=8\nretries=50" >> /etc/dnf/dnf.conf && \
