@@ -27,9 +27,10 @@ SHELL ["/bin/bash", "-xo", "pipefail", "-c"]
 ARG JOBS=16
 ARG VERBOSE_LOGS=ON
 ARG LTO_ENABLE=ON
-ARG LTO_CXX_FLAGS="-flto=auto -ffat-lto-objects -march=haswell"
-ARG LTO_LD_FLAGS="-flto=auto -ffat-lto-objects"
-
+#ARG LTO_CXX_FLAGS="-flto=auto -ffat-lto-objects -march=haswell"
+#ARG LTO_LD_FLAGS="-flto=auto -ffat-lto-objects"
+ARG LTO_CXX_FLAGS="-flto -ffat-lto-objects -march=haswell"
+ARG LTO_LD_FLAGS="-flto -ffat-lto-objects"
 
 # hadolint ignore=DL3041
 RUN echo -e "max_parallel_downloads=8\nretries=50" >> /etc/dnf/dnf.conf && \
@@ -48,6 +49,8 @@ RUN echo -e "max_parallel_downloads=8\nretries=50" >> /etc/dnf/dnf.conf && \
             pkg-config \
             wget && \
             dnf clean all
+
+RUN gcc --version && g++ --version
 
 ####### Azure SDK needs new boost:
 WORKDIR /boost
