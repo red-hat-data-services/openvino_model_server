@@ -70,7 +70,7 @@ spec:
     - name: pathInRepo
       value: pipelines/multi-arch-container-build.yaml
   taskRunTemplate:
-    serviceAccountName: build-pipeline-text-generation-inference-v2-23
+    serviceAccountName: build-pipeline-openvino-model-server-v2-24
   workspaces:
   - name: git-auth
     secret:
