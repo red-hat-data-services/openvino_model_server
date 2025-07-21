@@ -17,6 +17,9 @@ metadata:
   name: openvino-model-server-v2-24-on-push
   namespace: rhoai-tenant
 spec:
+  timeouts:
+    pipeline: 8h
+    tasks: 8h
   params:
   - name: git-url
     value: '{{source_url}}'
@@ -28,6 +31,33 @@ spec:
     value: Dockerfile.redhat
   - name: path-context
     value: .
+  - name: hermetic
+    value: false
+  - name: build-source-image
+    value: false
+  - name: build-image-index
+    value: false
+  - name: rebuild
+    value: true
+  - name: skip-checks
+    value: true
+  - name: fetch-git-tags
+    value: true
+  - name: clone-depth
+    value: "2147483647"
+  - name: build-platform
+    value: linux-extra-fast/amd64
+  taskRunSpecs:
+    - pipelineTaskName: build-container
+      stepSpecs:
+        - name: build
+          computeResources:
+            requests:
+              cpu: '8'
+              memory: 16Gi
+            limits:
+              cpu: '16'
+              memory: 32Gi
   pipelineSpec:
     description: |
       This pipeline is ideal for building container images from a Containerfile while maintaining trust after pipeline customization.
@@ -231,7 +261,7 @@ spec:
         - name: name
           value: buildah-oci-ta
         - name: bundle
-          value: quay.io/konflux-ci/tekton-catalog/task-buildah-oci-ta:0.4@sha256:9e9bac2044d6231b44114046b9d528c135388699365f0f210ee810c01bd4d702
+          value: quay.io/konflux-ci/tekton-catalog/task-buildah-oci-ta:0.4@sha256:d90c4cf682189faab5c702e55f4855242e228ce1a05e54e1734b7b9c6fa40441
         - name: kind
           value: task
         resolver: bundles
