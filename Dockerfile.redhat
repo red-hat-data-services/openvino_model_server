@@ -48,6 +48,15 @@ RUN echo -e "max_parallel_downloads=8\nretries=50" >> /etc/dnf/dnf.conf && \
             pkg-config \
             wget && \
             dnf clean all
+#debug
+RUN echo 'int main() { return 0; }' > test.cpp && \
+    echo 'cmake_minimum_required(VERSION 3.10)\n\
+project(TestCXX)\n\
+set(CMAKE_CXX_FLAGS "-flto=auto -ffat-lto-objects -march=haswell")\n\
+add_executable(test test.cpp)' > CMakeLists.txt && \
+    mkdir build && cd build && \
+    cmake .. && make || (echo "Expected failure occurred" && exit 1)
+
 
 ####### Azure SDK needs new boost:
 WORKDIR /boost
