@@ -255,17 +255,7 @@ ARG ov_tokenizers_branch=releases/2025/2
 # hadolint ignore=DL3003
 RUN git clone https://github.com/openvinotoolkit/openvino_tokenizers.git /openvino_tokenizers && cd /openvino_tokenizers && git checkout $ov_tokenizers_branch && git submodule update --init --recursive
 WORKDIR /openvino_tokenizers/build
-#RUN cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_VERBOSE_MAKEFILE="${VERBOSE_LOGS}" -DCMAKE_CXX_FLAGS=" ${LTO_CXX_FLAGS} " -DCMAKE_SHARED_LINKER_FLAGS="${LTO_LD_FLAGS}"  && cmake --build . --parallel $JOBS ; cp /openvino_tokenizers/build/src/lib*.so /opt/intel/openvino/runtime/lib/intel64/
-#debug
-RUN echo "Using CXX_FLAGS=${LTO_CXX_FLAGS}" && \
-    echo "Using LD_FLAGS=${LTO_LD_FLAGS}" && \
-    cmake .. \
-      -DCMAKE_BUILD_TYPE=Release \
-      -DCMAKE_VERBOSE_MAKEFILE=${VERBOSE_LOGS} \
-      -DCMAKE_CXX_FLAGS=${LTO_CXX_FLAGS} \
-      -DCMAKE_SHARED_LINKER_FLAGS=${LTO_LD_FLAGS} \
-    && cmake --build . --parallel $JOBS \
-    && cp /openvino_tokenizers/build/src/lib*.so /opt/intel/openvino/runtime/lib/intel64/
+RUN cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_VERBOSE_MAKEFILE="${VERBOSE_LOGS}" -DCMAKE_CXX_FLAGS=" ${LTO_CXX_FLAGS} " -DCMAKE_SHARED_LINKER_FLAGS="${LTO_LD_FLAGS}"  && cmake --build . --parallel $JOBS ; cp /openvino_tokenizers/build/src/lib*.so /opt/intel/openvino/runtime/lib/intel64/
 WORKDIR /openvino_tokenizers/
 # Install the openvino_tokenizers python bindings and use a symlink to point
 # to the shared object in it's final location.
