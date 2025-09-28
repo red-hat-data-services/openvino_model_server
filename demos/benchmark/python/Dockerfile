@@ -14,7 +14,7 @@
 # limitations under the License.
 #
 
-FROM haproxy:2.8.2
+FROM haproxy:3.2.5
 
 ARG DEB_BUILD_DEPENDANTS="python3-pip curl"
 USER root
