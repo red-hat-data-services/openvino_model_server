@@ -6,7 +6,7 @@ All Tekton file updates **must be made in the `konflux-central` repository**.
 
 ## ✅ How to Make Changes
 
-To modify the pipelines for `openvino_model_server` in the `rhoai-3.0` release:
+To modify the pipelines for `openvino_model_server` in the `rhoai-3.2` release:
 
 - Clone the [`konflux-central`](https://github.com/red-hat-data-services/konflux-central) repository.
 
@@ -18,7 +18,7 @@ cd konflux-central
 - Check out the release branch
 
 ```bash
-git checkout rhoai-3.0
+git checkout rhoai-3.2
 ```
 
 - Navigate to the Tekton files for your component(s).
@@ -32,8 +32,8 @@ cd pipelineruns/openvino_model_server/.tekton
 - Commit and push your changes.
 
 ```bash
-git commit -am "Update pipelinerun for openvino_model_server (rhoai-3.0)"
-git push origin rhoai-3.0
+git commit -am "Update pipelinerun for openvino_model_server (rhoai-3.2)"
+git push origin rhoai-3.2
 ```
 
 - Once pushed, automation will automatically sync your updates to the corresponding component repository.
