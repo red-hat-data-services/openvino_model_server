@@ -15,11 +15,18 @@
 //*****************************************************************************
 #include <cstdio>
 #include <memory>
+#include <optional>
 #include <sstream>
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 #include <stdlib.h>
+
+#include "../tfs_frontend/tfs_request_utils.hpp"
+#include "../tfs_frontend/tfs_utils.hpp"
+#include "../kfs_frontend/kfs_utils.hpp"
+
+#include "../deserialization_main.hpp"
 
 #include "../dags/dl_node.hpp"
 #include "../dags/entry_node.hpp"
@@ -28,14 +35,14 @@
 #include "../dags/pipeline.hpp"
 #include "../dags/pipeline_factory.hpp"
 #include "../dags/pipelinedefinition.hpp"
-#include "../kfs_frontend/kfs_utils.hpp"
+#include "../tfs_frontend/deserialization.hpp"
+#include "../inference_executor.hpp"
 #include "../localfilesystem.hpp"
 #include "../logging.hpp"
 #include "../metric_registry.hpp"
 #include "../model_metric_reporter.hpp"
 #include "../modelconfig.hpp"
 #include "../modelinstance.hpp"
-#include "../prediction_service_utils.hpp"
 #include "../status.hpp"
 #include "../tensor_conversion.hpp"
 #include "../timer.hpp"
@@ -50,7 +57,7 @@ using testing::Return;
 
 using ::testing::ElementsAre;
 
-const uint NIREQ = 2;
+const uint32_t NIREQ = 2;
 
 template <typename Pair,
     typename RequestType = typename Pair::first_type,
@@ -94,6 +101,10 @@ public:
 
     void checkScalarResponse(float inputScalar, const std::string& pipelineName) {
         ::checkScalarResponse(customPipelineOutputName, inputScalar, response, pipelineName);
+    }
+
+    void checkStringResponse(const std::vector<std::string>& inputStrings, const std::string& pipelineName) {
+        ::checkStringResponse(customPipelineOutputName, inputStrings, response, pipelineName);
     }
 
     ModelConfig config;
@@ -204,7 +215,7 @@ protected:
 
     void performWrongPipelineConfigTest(const char* configFileContent) {
         std::string fileToReload = directoryPath + "/ovms_config_file1.json";
-        createConfigFileWithContent(configFileContent, fileToReload);
+        createConfigFileWithContent(adjustConfigForTargetPlatformCStr(configFileContent), fileToReload);
         ConstructorEnabledModelManager managerWithDummyModel;
         managerWithDummyModel.loadConfig(fileToReload);
         std::unique_ptr<Pipeline> pipeline;
@@ -266,6 +277,47 @@ TYPED_TEST(EnsembleFlowBothApiTest, DummyModel) {
     ASSERT_EQ(pipeline.execute(DEFAULT_TEST_CONTEXT), StatusCode::OK);
     const int dummySeriallyConnectedCount = 1;
     this->checkDummyResponse(dummySeriallyConnectedCount, 1, pipelineName);
+}
+
+TYPED_TEST(EnsembleFlowBothApiTest, NativeStringModel) {
+    // Most basic configuration, just process single passthrough string model request
+    // input   passthrough    output
+    //  O---------->O---------->O
+    ConstructorEnabledModelManager managerWithStringModel;
+    this->config = NATIVE_STRING_MODEL_CONFIG;
+    this->config.setBatchingParams("");
+    ASSERT_EQ(managerWithStringModel.reloadModelWithVersions(this->config), ovms::StatusCode::OK_RELOADED);
+
+    // Configure pipeline
+    this->dagDummyModelInputTensorInfo = std::make_shared<ovms::TensorInfo>(this->customPipelineInputName,
+        ovms::Precision::STRING,
+        ovms::Shape{-1},
+        Layout{"N..."});
+    this->dagDummyModelOutputTensorInfo = std::make_shared<ovms::TensorInfo>(this->customPipelineOutputName,
+        ovms::Precision::STRING,
+        ovms::Shape{-1},
+        Layout{"N..."});
+    const tensor_map_t inputsInfo{{this->customPipelineInputName, this->dagDummyModelInputTensorInfo}};
+    std::vector<std::string> inputStrings = {"ala", "", "ma", "kota"};
+    this->request.Clear();
+    prepareInferStringRequest(this->request, this->customPipelineInputName, inputStrings);
+    auto input_node = std::make_unique<EntryNode<typename TypeParam::first_type>>(&this->request, inputsInfo);
+    auto model_node = std::make_unique<DLNode>("string_node", "passthrough_string", this->requestedModelVersion, managerWithStringModel);
+    const tensor_map_t outputsInfo{{this->customPipelineOutputName, this->dagDummyModelOutputTensorInfo}};
+    std::set<std::string> gatherFromNode = {};
+    std::string pipelineName = "test_pipeline";
+    auto output_node = std::make_unique<ExitNode<typename TypeParam::second_type>>(&this->response, outputsInfo, gatherFromNode, true, pipelineName);
+    Pipeline pipeline(*input_node, *output_node, *this->reporter);
+    pipeline.connect(*input_node, *model_node, {{this->customPipelineInputName, PASSTHROUGH_STRING_MODEL_INPUT_NAME}});
+    pipeline.connect(*model_node, *output_node, {{PASSTHROUGH_STRING_MODEL_OUTPUT_NAME, this->customPipelineOutputName}});
+
+    pipeline.push(std::move(input_node));
+    pipeline.push(std::move(model_node));
+    pipeline.push(std::move(output_node));
+
+    ASSERT_EQ(pipeline.execute(DEFAULT_TEST_CONTEXT), StatusCode::OK);
+
+    this->checkStringResponse(inputStrings, pipelineName);
 }
 
 TYPED_TEST(EnsembleFlowBothApiTest, ScalarModel) {
@@ -784,7 +836,7 @@ TEST_F(EnsembleFlowTest, DummyModelDirectAndPipelineInference) {
 
     tensorflow::serving::PredictResponse simpleModelResponse;
     // Do the inference directly on dummy model before inference on pipeline
-    ASSERT_EQ(model->infer(&simpleModelRequest, &simpleModelResponse, unload_guard), ovms::StatusCode::OK);
+    ASSERT_EQ(ovms::infer(*model, &simpleModelRequest, &simpleModelResponse, unload_guard), ovms::StatusCode::OK);
 
     ASSERT_EQ(simpleModelResponse.outputs().count(DUMMY_MODEL_OUTPUT_NAME), 1);
     auto& output_tensor = (*simpleModelResponse.mutable_outputs())[DUMMY_MODEL_OUTPUT_NAME];
@@ -821,7 +873,7 @@ TEST_F(EnsembleFlowTest, DummyModelDirectAndPipelineInference) {
     checkDummyResponse(dummySeriallyConnectedCount);
 
     // Do the inference directly on dummy model after inference on pipeline
-    ASSERT_EQ(model->infer(&simpleModelRequest, &simpleModelResponse, unload_guard), ovms::StatusCode::OK);
+    ASSERT_EQ(ovms::infer(*model, &simpleModelRequest, &simpleModelResponse, unload_guard), ovms::StatusCode::OK);
 
     ASSERT_EQ(simpleModelResponse.outputs().count(DUMMY_MODEL_OUTPUT_NAME), 1);
     output_tensor = (*simpleModelResponse.mutable_outputs())[DUMMY_MODEL_OUTPUT_NAME];
@@ -1947,6 +1999,36 @@ TEST_F(EnsembleFlowTest, CorrectPipelineDefinitionNodesValidation) {
     ASSERT_EQ(pipelineDefinition->validateNodes(managerWithDummyModel), StatusCode::OK);
 }
 
+TEST_F(EnsembleFlowTest, PipelineWithStringModelConnectionUnsupported) {
+    ConstructorEnabledModelManager managerWithStringModel;
+    ovms::ModelConfig config = NATIVE_STRING_MODEL_CONFIG;
+    ASSERT_EQ(managerWithStringModel.reloadModelWithVersions(config), StatusCode::OK_RELOADED);
+
+    // Simulate reading from pipeline_config.json
+    std::vector<NodeInfo> info{
+        {NodeKind::ENTRY, ENTRY_NODE_NAME, "", std::nullopt, {{customPipelineInputName, customPipelineInputName}}},
+        {NodeKind::DL, "string_node_1", "passthrough_string", std::nullopt, {{PASSTHROUGH_STRING_MODEL_OUTPUT_NAME, PASSTHROUGH_STRING_MODEL_OUTPUT_NAME}}},
+        {NodeKind::DL, "string_node_2", "passthrough_string", std::nullopt, {{PASSTHROUGH_STRING_MODEL_OUTPUT_NAME, PASSTHROUGH_STRING_MODEL_OUTPUT_NAME}}},
+        {NodeKind::EXIT, EXIT_NODE_NAME},
+    };
+
+    pipeline_connections_t connections;
+
+    // request (customPipelineInputName) O--------->O string node 1 (PASSTHROUGH_STRING_MODEL_INPUT_NAME)
+    connections["string_node_1"] = {
+        {ENTRY_NODE_NAME, {{customPipelineInputName, PASSTHROUGH_STRING_MODEL_INPUT_NAME}}}};
+    // string node 1 (PASSTHROUGH_STRING_MODEL_OUTPUT_NAME) O--------->O string node 2 (PASSTHROUGH_STRING_MODEL_INPUT_NAME)
+    connections["string_node_2"] = {
+        {"string_node_1", {{PASSTHROUGH_STRING_MODEL_OUTPUT_NAME, PASSTHROUGH_STRING_MODEL_INPUT_NAME}}}};
+    // string node 2 (PASSTHROUGH_STRING_MODEL_OUTPUT_NAME) O--------->O response (customPipelineOutputName)
+    connections[EXIT_NODE_NAME] = {
+        {"string_node_2", {{PASSTHROUGH_STRING_MODEL_OUTPUT_NAME, customPipelineOutputName}}}};
+
+    // Create pipeline definition
+    std::unique_ptr<PipelineDefinition> pipelineDefinition = std::make_unique<PipelineDefinition>("my_new_pipeline", info, connections);
+    ASSERT_EQ(pipelineDefinition->validateNodes(managerWithStringModel), StatusCode::NOT_IMPLEMENTED);
+}
+
 TEST_F(EnsembleFlowTest, PipelineDefinitionNodesWithModelBatchingModeAutoValidation) {
     ConstructorEnabledModelManager managerWithDummyModel;
     config.setBatchingMode(AUTO);
@@ -2794,7 +2876,7 @@ static const char* pipelineOneDummyConfig = R"(
 
 TEST_F(EnsembleFlowTest, PipelineFactoryCreationWithInputOutputsMappings) {
     std::string fileToReload = directoryPath + "/ovms_config_file.json";
-    createConfigFileWithContent(pipelineOneDummyConfig, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineOneDummyConfig), fileToReload);
     ConstructorEnabledModelManager managerWithDummyModel;
     managerWithDummyModel.loadConfig(fileToReload);
     std::unique_ptr<Pipeline> pipeline;
@@ -2867,7 +2949,7 @@ static const char* pipelineOneDummyConfig2ParallelDummy = R"(
 
 TEST_F(EnsembleFlowTest, PipelineFactoryCreationWithInputOutputsMappings2ParallelDummy) {
     std::string fileToReload = directoryPath + "/ovms_config_file.json";
-    createConfigFileWithContent(pipelineOneDummyConfig2ParallelDummy, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineOneDummyConfig2ParallelDummy), fileToReload);
     ConstructorEnabledModelManager managerWithDummyModel;
     managerWithDummyModel.loadConfig(fileToReload);
     std::unique_ptr<Pipeline> pipeline;
@@ -3210,7 +3292,7 @@ TEST_F(EnsembleFlowTest, ErrorHandlingSkipsDeferredNodesExecutionIfExecutionFail
 
     // Expected result - have pipeline cancelled with proper error code
 
-    // Manger with dummy model and nireq=1
+    // Manager with dummy model and nireq=1
     ConstructorEnabledModelManager managerWithDummyModel;
     config.setNireq(1);
     managerWithDummyModel.reloadModelWithVersions(config);
@@ -3434,7 +3516,7 @@ TEST_F(EnsembleFlowTest, ExecuteOnPipelineCreatedBeforeRetireShouldPass) {
     ASSERT_TRUE(status.ok());
     pd.retire(managerWithDummyModel);
     pipelineBeforeRetire->execute(DEFAULT_TEST_CONTEXT);
-    uint dummySeriallyConnectedCount = 1;
+    uint32_t dummySeriallyConnectedCount = 1;
     checkDummyResponse(dummySeriallyConnectedCount);
 }
 
@@ -3582,7 +3664,7 @@ TEST_F(EnsembleFlowTest, WaitForLoadingPipelineDefinitionFromBeginStatus) {
     });
     status = pd.create(pipelineBeforeRetire, &request, &response, managerWithDummyModel);
     ASSERT_TRUE(status.ok()) << status.string();
-    uint dummySeriallyConnectedCount = 1;
+    uint32_t dummySeriallyConnectedCount = 1;
     pipelineBeforeRetire->execute(DEFAULT_TEST_CONTEXT);
     checkDummyResponse(dummySeriallyConnectedCount);
     t.join();
@@ -3606,7 +3688,7 @@ static const char* configJsonWithNoPipeline = R"(
 
 TEST_F(EnsembleFlowTest, RetireAllPipelinesAfterLoading) {
     std::string fileToReload = directoryPath + "/ovms_config_file.json";
-    createConfigFileWithContent(pipelineOneDummyConfig, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineOneDummyConfig), fileToReload);
     ConstructorEnabledModelManager manager;
     auto status = manager.loadConfig(fileToReload);
     ASSERT_TRUE(status.ok()) << status.string();
@@ -3661,7 +3743,7 @@ const std::string NEW_INPUT_NAME = "NEW_INPUT_NAME";
 
 TEST_F(EnsembleFlowTest, ReloadPipelineAfterLoadingSuccessfullyChangedInputName) {
     std::string fileToReload = directoryPath + "/ovms_config_file.json";
-    createConfigFileWithContent(pipelineOneDummyConfig, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineOneDummyConfig), fileToReload);
     ConstructorEnabledModelManager manager;
     auto status = manager.loadConfig(fileToReload);
     ASSERT_TRUE(status.ok()) << status.string();
@@ -3673,7 +3755,7 @@ TEST_F(EnsembleFlowTest, ReloadPipelineAfterLoadingSuccessfullyChangedInputName)
     ASSERT_EQ(inputsInfoBefore.count(NEW_INPUT_NAME), 0);
 
     // now reload
-    createConfigFileWithContent(pipelineOneDummyConfigWithChangedInputName, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineOneDummyConfigWithChangedInputName), fileToReload);
     manager.loadConfig(fileToReload);
     ASSERT_EQ(manager.getPipelineFactory().findDefinitionByName(PIPELINE_1_DUMMY_NAME)->getStateCode(),
         PipelineDefinitionStateCode::AVAILABLE);
@@ -3714,13 +3796,13 @@ static const char* pipelineOneDummyConfigWithMissingModel = R"(
 })";
 TEST_F(EnsembleFlowTest, ReloadPipelineAfterLoadingFailDueToMissingModel) {
     std::string fileToReload = directoryPath + "/ovms_config_file.json";
-    createConfigFileWithContent(pipelineOneDummyConfig, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineOneDummyConfig), fileToReload);
     ConstructorEnabledModelManager manager;
     auto status = manager.loadConfig(fileToReload);
     ASSERT_TRUE(status.ok()) << status.string();
     ASSERT_EQ(manager.getPipelineFactory().findDefinitionByName(PIPELINE_1_DUMMY_NAME)->getStateCode(),
         PipelineDefinitionStateCode::AVAILABLE);
-    createConfigFileWithContent(pipelineOneDummyConfigWithMissingModel, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineOneDummyConfigWithMissingModel), fileToReload);
     manager.loadConfig(fileToReload);
     ASSERT_EQ(manager.getPipelineFactory().findDefinitionByName(PIPELINE_1_DUMMY_NAME)->getStateCode(),
         PipelineDefinitionStateCode::LOADING_PRECONDITION_FAILED);
@@ -3767,13 +3849,13 @@ static const char* pipelineOneDummyConfigWithCorruptedModel = R"(
 })";
 TEST_F(EnsembleFlowTest, ReloadPipelineAfterLoadingFailDueToCorruptedModel) {
     std::string fileToReload = directoryPath + "/ovms_config_file.json";
-    createConfigFileWithContent(pipelineOneDummyConfigWithCorruptedModel, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineOneDummyConfigWithCorruptedModel), fileToReload);
     ConstructorEnabledModelManager manager;
     auto status = manager.loadConfig(fileToReload);
     ASSERT_EQ(status, StatusCode::PATH_INVALID);
     ASSERT_EQ(manager.getPipelineFactory().findDefinitionByName(PIPELINE_1_DUMMY_NAME)->getStateCode(),
         PipelineDefinitionStateCode::LOADING_PRECONDITION_FAILED);
-    createConfigFileWithContent(pipelineOneDummyConfig, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineOneDummyConfig), fileToReload);
     manager.loadConfig(fileToReload);
     ASSERT_EQ(manager.getPipelineFactory().findDefinitionByName(PIPELINE_1_DUMMY_NAME)->getStateCode(),
         PipelineDefinitionStateCode::AVAILABLE);
@@ -3918,7 +4000,7 @@ TEST_F(EnsembleFlowTest, RetireReloadAddPipelineAtTheSameTime) {
     //  * change connection name between 2 nodes
     //  * add new pipeline (just with different name)
     std::string fileToReload = directoryPath + "/ovms_config_file.json";
-    createConfigFileWithContent(pipelineTwoDummyConfig, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineTwoDummyConfig), fileToReload);
     ConstructorEnabledModelManager manager;
     auto status = manager.loadConfig(fileToReload);
     ASSERT_TRUE(status.ok()) << status.string();
@@ -3933,7 +4015,7 @@ TEST_F(EnsembleFlowTest, RetireReloadAddPipelineAtTheSameTime) {
     ASSERT_EQ(inputsInfoBefore.count(NEW_INPUT_NAME), 0);
 
     // now reload
-    createConfigFileWithContent(pipelineTwoDummyConfigAfterChanges, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineTwoDummyConfigAfterChanges), fileToReload);
     status = manager.loadConfig(fileToReload);
     ASSERT_EQ(manager.getPipelineFactory().findDefinitionByName(PIPELINE_TO_RETIRE)->getStateCode(),
         PipelineDefinitionStateCode::RETIRED);
@@ -3995,7 +4077,7 @@ TEST_F(EnsembleFlowTest, EnablingDynamicParametersForModelUsedInPipeline) {
         Test ensures model have no dynamic parameters applied.
     */
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineOneDummyConfig, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineOneDummyConfig), fileToReload);
     ConstructorEnabledModelManager manager;
     auto status = manager.loadConfig(fileToReload);
     ASSERT_TRUE(status.ok()) << status.string();
@@ -4003,7 +4085,7 @@ TEST_F(EnsembleFlowTest, EnablingDynamicParametersForModelUsedInPipeline) {
     ASSERT_EQ(manager.getPipelineFactory().findDefinitionByName(PIPELINE_1_DUMMY_NAME)->getStateCode(),
         PipelineDefinitionStateCode::AVAILABLE);
 
-    createConfigFileWithContent(pipelineOneDynamicParamDummyConfig, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineOneDynamicParamDummyConfig), fileToReload);
     status = manager.loadConfig(fileToReload);
 
     ASSERT_EQ(manager.getPipelineFactory().findDefinitionByName(PIPELINE_1_DUMMY_NAME)->getStateCode(),
@@ -4054,11 +4136,11 @@ TEST_F(EnsembleFlowTest, EnablingDynamicParametersAndRemovingPipeline) {
     /*
         This test modifies config.json to enable dynamic parameters for model used in pipeline.
         In the same time, we remove pipeline from config file.
-        Test ensures such change is valid and model will be reloaded and dynamic parmeters will be applied.
+        Test ensures such change is valid and model will be reloaded and dynamic parameters will be applied.
         Test ensures pipeline gets retired.
     */
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineOneDummyConfig, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineOneDummyConfig), fileToReload);
     ConstructorEnabledModelManager manager;
     auto status = manager.loadConfig(fileToReload);
     ASSERT_TRUE(status.ok()) << status.string();
@@ -4066,7 +4148,7 @@ TEST_F(EnsembleFlowTest, EnablingDynamicParametersAndRemovingPipeline) {
     ASSERT_EQ(manager.getPipelineFactory().findDefinitionByName(PIPELINE_1_DUMMY_NAME)->getStateCode(),
         PipelineDefinitionStateCode::AVAILABLE);
 
-    createConfigFileWithContent(dummyWithDynamicParamConfig, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(dummyWithDynamicParamConfig), fileToReload);
     status = manager.loadConfig(fileToReload);
 
     ASSERT_EQ(manager.getPipelineFactory().findDefinitionByName(PIPELINE_1_DUMMY_NAME)->getStateCode(),
@@ -4086,7 +4168,7 @@ TEST_F(EnsembleFlowTest, EnablingStatefulParametersForModelUsedInPipeline) {
         Test ensures pipeline gets retired.
     */
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineOneDummyConfig, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineOneDummyConfig), fileToReload);
     ConstructorEnabledModelManager manager;
     auto status = manager.loadConfig(fileToReload);
     ASSERT_TRUE(status.ok()) << status.string();
@@ -4094,7 +4176,7 @@ TEST_F(EnsembleFlowTest, EnablingStatefulParametersForModelUsedInPipeline) {
     ASSERT_EQ(manager.getPipelineFactory().findDefinitionByName(PIPELINE_1_DUMMY_NAME)->getStateCode(),
         PipelineDefinitionStateCode::AVAILABLE);
 
-    createConfigFileWithContent(dummyWithStatefulModelType, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(dummyWithStatefulModelType), fileToReload);
     status = manager.loadConfig(fileToReload);
 
     ASSERT_EQ(manager.getPipelineFactory().findDefinitionByName(PIPELINE_1_DUMMY_NAME)->getStateCode(),
@@ -4253,7 +4335,7 @@ static const std::string MEDIAPIPE_DUMMY_NAME = "dummy";
 TEST_F(EnsembleFlowTest, MediapipeConfigModelWithSameName) {
     // Expected result - model added, adding pipeline failed
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(mediapipeSameNameConfigMediapipe, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(mediapipeSameNameConfigMediapipe), fileToReload);
     ConstructorEnabledModelManager manager;
     auto status = manager.loadConfig(fileToReload);
     ASSERT_EQ(status, StatusCode::MEDIAPIPE_GRAPH_NAME_OCCUPIED);
@@ -4267,7 +4349,7 @@ TEST_F(EnsembleFlowTest, MediapipeConfigModelWithSameName) {
 TEST_F(EnsembleFlowTest, MediapipeConfigModelWithSameNamePipeline) {
     // Expected result - model added, adding pipeline failed
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(mediapipeSameNameConfigMediapipeWithPipeline, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(mediapipeSameNameConfigMediapipeWithPipeline), fileToReload);
     ConstructorEnabledModelManager manager;
     auto status = manager.loadConfig(fileToReload);
     ASSERT_EQ(status, StatusCode::MEDIAPIPE_GRAPH_NAME_OCCUPIED);
@@ -4280,7 +4362,7 @@ TEST_F(EnsembleFlowTest, MediapipeConfigModelWithSameNamePipeline) {
 TEST_F(EnsembleFlowTest, PipelineConfigModelWithSameName) {
     // Expected result - model added, adding pipeline failed
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineModelSameNameConfig, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineModelSameNameConfig), fileToReload);
     ConstructorEnabledModelManager manager;
     auto status = manager.loadConfig(fileToReload);
     ASSERT_EQ(status, StatusCode::PIPELINE_NAME_OCCUPIED);
@@ -4295,7 +4377,7 @@ TEST_F(EnsembleFlowTest, PipelineConfigModelWithSameName) {
 TEST_F(EnsembleFlowTest, ModelLoadedAddPipelineWithSameName) {
     // Expected result - adding pipeline failed
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineModelSameNameConfigNoPipeline, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineModelSameNameConfigNoPipeline), fileToReload);
     ConstructorEnabledModelManager manager;
     auto status = manager.loadConfig(fileToReload);
     ASSERT_TRUE(status.ok()) << status.string();
@@ -4304,7 +4386,7 @@ TEST_F(EnsembleFlowTest, ModelLoadedAddPipelineWithSameName) {
     ASSERT_NE(instance, nullptr);
     ASSERT_EQ(instance->getStatus().getState(), ModelVersionState::AVAILABLE);
 
-    createConfigFileWithContent(pipelineModelSameNameConfig, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineModelSameNameConfig), fileToReload);
     status = manager.loadConfig(fileToReload);
 
     ASSERT_FALSE(manager.getPipelineFactory().definitionExists(PIPELINE_1_DUMMY_NAME));
@@ -4317,7 +4399,7 @@ TEST_F(EnsembleFlowTest, ModelLoadedAddPipelineWithSameName) {
 TEST_F(EnsembleFlowTest, PipelineLoadedAddModelWithSameName) {
     // Expected result - adding model failed
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineOneDummyConfig, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineOneDummyConfig), fileToReload);
     ConstructorEnabledModelManager manager;
     auto status = manager.loadConfig(fileToReload);
     ASSERT_TRUE(status.ok()) << status.string();
@@ -4325,7 +4407,7 @@ TEST_F(EnsembleFlowTest, PipelineLoadedAddModelWithSameName) {
     ASSERT_EQ(manager.getPipelineFactory().findDefinitionByName(PIPELINE_1_DUMMY_NAME)->getStateCode(),
         PipelineDefinitionStateCode::AVAILABLE);
 
-    createConfigFileWithContent(pipelineModelSameNameConfig, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineModelSameNameConfig), fileToReload);
     status = manager.loadConfig(fileToReload);
 
     ASSERT_TRUE(manager.getPipelineFactory().definitionExists(PIPELINE_1_DUMMY_NAME));
@@ -4339,7 +4421,7 @@ TEST_F(EnsembleFlowTest, PipelineLoadedAddModelWithSameName) {
 TEST_F(EnsembleFlowTest, PipelineRetiredAddModelWithSameName) {
     // Expected result - adding model failed
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineOneDummyConfig, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineOneDummyConfig), fileToReload);
     ConstructorEnabledModelManager manager;
     auto status = manager.loadConfig(fileToReload);
     ASSERT_TRUE(status.ok()) << status.string();
@@ -4347,7 +4429,7 @@ TEST_F(EnsembleFlowTest, PipelineRetiredAddModelWithSameName) {
     ASSERT_EQ(manager.getPipelineFactory().findDefinitionByName(PIPELINE_1_DUMMY_NAME)->getStateCode(),
         PipelineDefinitionStateCode::AVAILABLE);
 
-    createConfigFileWithContent(pipelineModelSameNameConfigNoPipeline, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineModelSameNameConfigNoPipeline), fileToReload);
     status = manager.loadConfig(fileToReload);
 
     ASSERT_TRUE(manager.getPipelineFactory().definitionExists(PIPELINE_1_DUMMY_NAME));
@@ -4426,7 +4508,7 @@ static const char* pipelinePipelineSameNameConfig = R"(
 TEST_F(EnsembleFlowTest, PipelineAddSecondPipelineWithSameName) {
     // Expected result - adding second pipeline fails
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineOneDummyConfig, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineOneDummyConfig), fileToReload);
     ConstructorEnabledModelManager manager;
 
     auto status = manager.loadConfig(fileToReload);
@@ -4435,7 +4517,7 @@ TEST_F(EnsembleFlowTest, PipelineAddSecondPipelineWithSameName) {
     ASSERT_EQ(manager.getPipelineFactory().findDefinitionByName(PIPELINE_1_DUMMY_NAME)->getStateCode(),
         PipelineDefinitionStateCode::AVAILABLE);
 
-    createConfigFileWithContent(pipelinePipelineSameNameConfig, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelinePipelineSameNameConfig), fileToReload);
     status = manager.loadConfig(fileToReload);
 
     ASSERT_TRUE(manager.getPipelineFactory().definitionExists(PIPELINE_1_DUMMY_NAME));
@@ -4491,7 +4573,10 @@ static const char* pipelineDemultiplexerShapeNotEqualToDemultiplyCount = R"(
 
 TYPED_TEST(EnsembleFlowBothApiTest, DemultiplexerMultipleBatchSizeWithShapeNotEqualToDemultiplyCountNotAllowed) {
     std::string fileToReload = this->directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineDemultiplexerShapeNotEqualToDemultiplyCount, fileToReload);
+    std::string ovmsConfig = std::string(pipelineDemultiplexerShapeNotEqualToDemultiplyCount);
+    adjustConfigForTargetPlatform(ovmsConfig);
+
+    createConfigFileWithContent(ovmsConfig, fileToReload);
     ConstructorEnabledModelManager manager;
 
     auto status = manager.loadConfig(fileToReload);
@@ -4564,7 +4649,7 @@ static const char* pipelineInnerNodeConnectionShapeRangeNotMatch = R"(
 
 TEST_F(EnsembleFlowTest, InnerNodeConnectionShapeRangeNotMatch) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineInnerNodeConnectionShapeRangeNotMatch, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineInnerNodeConnectionShapeRangeNotMatch), fileToReload);
     ConstructorEnabledModelManager manager;
 
     auto status = manager.loadConfig(fileToReload);
@@ -4637,7 +4722,7 @@ static const char* pipelineInnerNodeConnectionShapeRangePartiallyMatch = R"(
 
 TEST_F(EnsembleFlowTest, InnerNodeConnectionShapeRangePartiallyMatch) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineInnerNodeConnectionShapeRangePartiallyMatch, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineInnerNodeConnectionShapeRangePartiallyMatch), fileToReload);
     ConstructorEnabledModelManager manager;
 
     auto status = manager.loadConfig(fileToReload);
@@ -4692,7 +4777,10 @@ static const char* pipelineDemultiplexerShapeEqualToDemultiplyCount = R"(
 
 TYPED_TEST(EnsembleFlowBothApiTest, DemultiplexerMultipleBatchSizeWithShapeEqualToDemultiplyCountAllowed) {
     std::string fileToReload = this->directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineDemultiplexerShapeEqualToDemultiplyCount, fileToReload);
+    std::string ovmsConfig = std::string(pipelineDemultiplexerShapeEqualToDemultiplyCount);
+    adjustConfigForTargetPlatform(ovmsConfig);
+
+    createConfigFileWithContent(ovmsConfig, fileToReload);
     ConstructorEnabledModelManager manager;
 
     auto status = manager.loadConfig(fileToReload);
@@ -4747,7 +4835,7 @@ static const char* pipelineSingleIncrement4DimInputNHWC = R"(
 
 TEST_F(EnsembleFlowTest, ExecuteSingleIncrement4DimInputNHWC) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineSingleIncrement4DimInputNHWC, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineSingleIncrement4DimInputNHWC), fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -4806,7 +4894,10 @@ static const char* pipelineSingleIncrement4DimInputNHWCDynamicBatch = R"(
 
 TYPED_TEST(EnsembleFlowBothApiTest, ExecuteSingleIncrement4DimInputNHWCDynamicBatch) {
     std::string fileToReload = this->directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineSingleIncrement4DimInputNHWCDynamicBatch, fileToReload);
+    std::string ovmsConfig = std::string(pipelineSingleIncrement4DimInputNHWCDynamicBatch);
+    adjustConfigForTargetPlatform(ovmsConfig);
+
+    createConfigFileWithContent(ovmsConfig, fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -4865,7 +4956,7 @@ static const char* pipelineSingleIncrement4DimOutputNHWC = R"(
 
 TEST_F(EnsembleFlowTest, ExecuteSingleIncrement4DimOutputNHWC) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineSingleIncrement4DimOutputNHWC, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineSingleIncrement4DimOutputNHWC), fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -4924,7 +5015,10 @@ static const char* pipelineSingleIncrement4DimOutputNHWCDynamicBatch = R"(
 
 TYPED_TEST(EnsembleFlowBothApiTest, ExecuteSingleIncrement4DimOutputNHWCDynamicBatch) {
     std::string fileToReload = this->directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineSingleIncrement4DimOutputNHWCDynamicBatch, fileToReload);
+    std::string ovmsConfig = std::string(pipelineSingleIncrement4DimOutputNHWCDynamicBatch);
+    adjustConfigForTargetPlatform(ovmsConfig);
+
+    createConfigFileWithContent(ovmsConfig, fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -5010,7 +5104,7 @@ static const char* pipelineAmbiguousInputMeta = R"(
 
 TEST_F(EnsembleFlowTest, PipelineAmbiguousInputMetaFailsToLoad) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineAmbiguousInputMeta, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineAmbiguousInputMeta), fileToReload);
     ConstructorEnabledModelManager manager;
     ASSERT_EQ(manager.loadConfig(fileToReload), StatusCode::PIPELINE_INPUTS_AMBIGUOUS_METADATA);
 }
@@ -5084,7 +5178,7 @@ static const char* pipelineInnerConnectedNhwc = R"(
 
 TEST_F(EnsembleFlowTest, ExecutePipelineWithInnerNhwcConnection) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineInnerConnectedNhwc, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineInnerConnectedNhwc), fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -5099,10 +5193,10 @@ TEST_F(EnsembleFlowTest, ExecutePipelineWithInnerNhwcConnection) {
 
 class EnsembleFlowTestBinaryInput : public EnsembleFlowTest {
 public:
-    const std::string imagePath = "/ovms/src/test/binaryutils/rgb.jpg";
-    const std::string imagePath2x2 = "/ovms/src/test/binaryutils/rgb2x2.jpg";
-    const std::string imagePath4x4 = "/ovms/src/test/binaryutils/rgb4x4.jpg";
-    const std::string graycaleImagePath = "/ovms/src/test/binaryutils/grayscale.jpg";
+    const std::string imagePath = getGenericFullPathForSrcTest("/ovms/src/test/binaryutils/rgb.jpg");
+    const std::string imagePath2x2 = getGenericFullPathForSrcTest("/ovms/src/test/binaryutils/rgb2x2.jpg");
+    const std::string imagePath4x4 = getGenericFullPathForSrcTest("/ovms/src/test/binaryutils/rgb4x4.jpg");
+    const std::string graycaleImagePath = getGenericFullPathForSrcTest("/ovms/src/test/binaryutils/grayscale.jpg");
 };
 
 static const char* pipelineSingleIncrement4DimOutputNHWC1x1 = R"(
@@ -5150,7 +5244,7 @@ static const char* pipelineSingleIncrement4DimOutputNHWC1x1 = R"(
 
 TEST_F(EnsembleFlowTestBinaryInput, BatchSize1) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineSingleIncrement4DimOutputNHWC1x1, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineSingleIncrement4DimOutputNHWC1x1), fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -5207,7 +5301,7 @@ static const char* pipelineWith4DimDummyFP64 = R"(
 
 TEST_F(EnsembleFlowTestBinaryInput, DoublePrecision) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineWith4DimDummyFP64, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineWith4DimDummyFP64), fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -5265,7 +5359,7 @@ static const char* pipelineSingleIncrement4DimOutputNHWC1x1BatchAny = R"(
 
 TEST_F(EnsembleFlowTestBinaryInput, BatchSizeAny) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineSingleIncrement4DimOutputNHWC1x1BatchAny, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineSingleIncrement4DimOutputNHWC1x1BatchAny), fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -5323,7 +5417,7 @@ static const char* pipelineSingleIncrement4DimOutputNCHW1x1 = R"(
 
 TEST_F(EnsembleFlowTestBinaryInput, NchwEntryNotSupported) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineSingleIncrement4DimOutputNCHW1x1, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineSingleIncrement4DimOutputNCHW1x1), fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -5380,7 +5474,7 @@ static const char* pipelineSingleIncrement4DimOutputNHWC1x1Grayscale = R"(
 
 TEST_F(EnsembleFlowTestBinaryInput, GrayscaleImage) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineSingleIncrement4DimOutputNHWC1x1Grayscale, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineSingleIncrement4DimOutputNHWC1x1Grayscale), fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -5438,7 +5532,7 @@ static const char* pipelineSingleIncrement4DimOutputNHWC1x1BS5 = R"(
 
 TEST_F(EnsembleFlowTestBinaryInput, BatchSize5) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineSingleIncrement4DimOutputNHWC1x1BS5, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineSingleIncrement4DimOutputNHWC1x1BS5), fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -5497,7 +5591,7 @@ static const char* pipelineSingleIncrement4DimOutputNHWC2x2 = R"(
 
 TEST_F(EnsembleFlowTestBinaryInput, ResizeBatch1) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineSingleIncrement4DimOutputNHWC2x2, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineSingleIncrement4DimOutputNHWC2x2), fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -5555,7 +5649,7 @@ static const char* pipelineSingleIncrement4DimOutputNHWC2x2BS5 = R"(
 
 TEST_F(EnsembleFlowTestBinaryInput, ResizeBatch5) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineSingleIncrement4DimOutputNHWC2x2BS5, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineSingleIncrement4DimOutputNHWC2x2BS5), fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -5614,7 +5708,7 @@ static const char* pipelineSingleIncrement4DimOutputNHWC1Channel = R"(
 
 TEST_F(EnsembleFlowTestBinaryInput, ColorChannelsDiffer) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineSingleIncrement4DimOutputNHWC1Channel, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineSingleIncrement4DimOutputNHWC1Channel), fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -5628,7 +5722,7 @@ TEST_F(EnsembleFlowTestBinaryInput, ColorChannelsDiffer) {
 
 TEST_F(EnsembleFlowTestBinaryInput, InvalidData) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineSingleIncrement4DimOutputNHWC1x1, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineSingleIncrement4DimOutputNHWC1x1), fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -5690,7 +5784,7 @@ static const char* pipelineSingleIncrement4DimOutputNHWC1x1EntryDemultiplexer = 
 
 TEST_F(EnsembleFlowTestBinaryInput, EntryDemultiplexer) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineSingleIncrement4DimOutputNHWC1x1EntryDemultiplexer, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineSingleIncrement4DimOutputNHWC1x1EntryDemultiplexer), fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -5750,7 +5844,7 @@ static const char* pipelineSingleIncrement4DimOutputNHWCRangeResolutionEntryStat
 
 TEST_F(EnsembleFlowTestBinaryInput, EntryStaticDemultiplexerResolutionMatches) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineSingleIncrement4DimOutputNHWCRangeResolutionEntryStaticDemultiplexer, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineSingleIncrement4DimOutputNHWCRangeResolutionEntryStaticDemultiplexer), fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -5766,7 +5860,7 @@ TEST_F(EnsembleFlowTestBinaryInput, EntryStaticDemultiplexerResolutionMatches) {
 
 TEST_F(EnsembleFlowTestBinaryInput, EntryStaticDemultiplexerResolutionAutoAlign) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineSingleIncrement4DimOutputNHWCRangeResolutionEntryStaticDemultiplexer, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineSingleIncrement4DimOutputNHWCRangeResolutionEntryStaticDemultiplexer), fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -5826,7 +5920,7 @@ static const char* pipelineSingleIncrement4DimOutputNHWCRangeResolutionEntryDyna
 
 TEST_F(EnsembleFlowTestBinaryInput, EntryDynamicDemultiplexerResolutionMatches) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineSingleIncrement4DimOutputNHWCRangeResolutionEntryDynamicDemultiplexer, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineSingleIncrement4DimOutputNHWCRangeResolutionEntryDynamicDemultiplexer), fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -5842,7 +5936,7 @@ TEST_F(EnsembleFlowTestBinaryInput, EntryDynamicDemultiplexerResolutionMatches) 
 
 TEST_F(EnsembleFlowTestBinaryInput, EntryDynamicDemultiplexerResolutionResolutionMismatch) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineSingleIncrement4DimOutputNHWCRangeResolutionEntryDynamicDemultiplexer, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineSingleIncrement4DimOutputNHWCRangeResolutionEntryDynamicDemultiplexer), fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -5897,7 +5991,7 @@ static const char* pipelineWithOnlyDynamicCustomNode = R"(
 // In this case we do not reject the request but create NHWC content out of that.
 TEST_F(EnsembleFlowTestBinaryInput, BinaryInputWithPipelineInputLayoutANY_RequestBS1) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineWithOnlyDynamicCustomNode, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineWithOnlyDynamicCustomNode), fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -5913,7 +6007,7 @@ TEST_F(EnsembleFlowTestBinaryInput, BinaryInputWithPipelineInputLayoutANY_Reques
 
 TEST_F(EnsembleFlowTestBinaryInput, BinaryInputWithPipelineInputLayoutANY_RequestBS2) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineWithOnlyDynamicCustomNode, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineWithOnlyDynamicCustomNode), fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -5927,7 +6021,7 @@ TEST_F(EnsembleFlowTestBinaryInput, BinaryInputWithPipelineInputLayoutANY_Reques
 
 TEST_F(EnsembleFlowTestBinaryInput, BinaryInputWithPipelineInputLayoutANY_RequestMisaligned) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineWithOnlyDynamicCustomNode, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineWithOnlyDynamicCustomNode), fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -5939,7 +6033,7 @@ TEST_F(EnsembleFlowTestBinaryInput, BinaryInputWithPipelineInputLayoutANY_Reques
 
 TEST_F(EnsembleFlowTest, TensorContentInputWithPipelineInputLayoutANY_RequestNhwc) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineWithOnlyDynamicCustomNode, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineWithOnlyDynamicCustomNode), fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -5989,7 +6083,7 @@ static const char* pipelineWithOnlyDynamicCustomNodeAndDemultiplexer = R"(
 
 TEST_F(EnsembleFlowTestBinaryInput, BinaryInputWithPipelineInputLayoutANYAndDemultiplexer_RequestBS1) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineWithOnlyDynamicCustomNodeAndDemultiplexer, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineWithOnlyDynamicCustomNodeAndDemultiplexer), fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -6005,7 +6099,7 @@ TEST_F(EnsembleFlowTestBinaryInput, BinaryInputWithPipelineInputLayoutANYAndDemu
 
 TEST_F(EnsembleFlowTestBinaryInput, BinaryInputWithPipelineInputLayoutANYAndDemultiplexer_RequestBS2) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineWithOnlyDynamicCustomNodeAndDemultiplexer, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineWithOnlyDynamicCustomNodeAndDemultiplexer), fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -6019,7 +6113,7 @@ TEST_F(EnsembleFlowTestBinaryInput, BinaryInputWithPipelineInputLayoutANYAndDemu
 
 TEST_F(EnsembleFlowTestBinaryInput, BinaryInputWithPipelineInputLayoutANYAndDemultiplexer_RequestMisaligned) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineWithOnlyDynamicCustomNodeAndDemultiplexer, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineWithOnlyDynamicCustomNodeAndDemultiplexer), fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -6031,7 +6125,10 @@ TEST_F(EnsembleFlowTestBinaryInput, BinaryInputWithPipelineInputLayoutANYAndDemu
 
 TYPED_TEST(EnsembleFlowBothApiTest, TensorContentInputWithPipelineInputLayoutANYAndDemultiplexer_RequestNhwc) {
     std::string fileToReload = this->directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineWithOnlyDynamicCustomNodeAndDemultiplexer, fileToReload);
+    std::string ovmsConfig = std::string(pipelineWithOnlyDynamicCustomNodeAndDemultiplexer);
+    adjustConfigForTargetPlatform(ovmsConfig);
+
+    createConfigFileWithContent(ovmsConfig, fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -6106,7 +6203,7 @@ static const char* pipelineWithDynamicCustomNodeDemultiplexerAndDynamicResolutio
 
 TEST_F(EnsembleFlowTestBinaryInput, BinaryInputWithPipelineInputLayoutANYCustomNodeDemultiplexerAndDynamicResolutionModel) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineWithDynamicCustomNodeDemultiplexerAndDynamicResolutionModel, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineWithDynamicCustomNodeDemultiplexerAndDynamicResolutionModel), fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -6185,7 +6282,7 @@ static const char* pipelineWithDynamicCustomNodeDemultiplexerAndRangeOfResolutio
 
 TEST_F(EnsembleFlowTestBinaryInput, BinaryInputWithPipelineInputLayoutANYCustomNodeDemultiplexerAndRangeOfResolutionModel) {
     std::string fileToReload = directoryPath + "/config.json";
-    createConfigFileWithContent(pipelineWithDynamicCustomNodeDemultiplexerAndRangeOfResolutionModel, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineWithDynamicCustomNodeDemultiplexerAndRangeOfResolutionModel), fileToReload);
     ConstructorEnabledModelManager manager;
     std::unique_ptr<Pipeline> pipeline;
 
@@ -6207,4 +6304,106 @@ TEST_F(EnsembleFlowTestBinaryInput, BinaryInputWithPipelineInputLayoutANYCustomN
 
     ASSERT_EQ(pipeline->execute(DEFAULT_TEST_CONTEXT), StatusCode::OK);
     checkIncrement4DimResponse<float>("pipeline_output", {45.0, 36.0, 246.0}, response, {1, 1, 3, 1, 1});
+}
+
+// Demultiplexer at request level (before model inference)
+static const char* pipelineSingleStringModelWithDemultiplexerRequest = R"(
+{
+    "model_config_list": [
+        {
+            "config": {
+                "name": "passthrough_string",
+                "base_path": "/ovms/src/test/passthrough_string",
+                "target_device": "CPU",
+                "model_version_policy": {"all": {}},
+                "nireq": 1
+            }
+        }
+    ],
+    "pipeline_config_list": [
+        {
+            "name": "pipe",
+            "inputs": ["pipeline_input"],
+            "demultiply_count": 0,
+            "nodes": [
+                {
+                    "name": "pipe_node",
+                    "model_name": "passthrough_string",
+                    "type": "DL model",
+                    "inputs": [
+                        {"my_name": {"node_name": "request",
+                                   "data_item": "pipeline_input"}}
+                    ],
+                    "outputs": [
+                        {"data_item": "my_name",
+                         "alias": "out"}
+                    ]
+                }
+            ],
+            "outputs": [
+                {"pipeline_output": {"node_name": "pipe_node",
+                                     "data_item": "out"}
+                }
+            ]
+        }
+    ]
+})";
+
+TEST_F(EnsembleFlowTest, PipelineWithStringDemultiplexerRequestUnsupported) {
+    std::string fileToReload = directoryPath + "/config.json";
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineSingleStringModelWithDemultiplexerRequest), fileToReload);
+    ConstructorEnabledModelManager manager;
+
+    ASSERT_EQ(manager.loadConfig(fileToReload), StatusCode::PIPELINE_STRING_DEMUILTIPLICATION_UNSUPPORTED);
+}
+
+// Demultiplexer at node level (after model inference)
+static const char* pipelineSingleStringModelWithDemultiplexerNode = R"(
+{
+    "model_config_list": [
+        {
+            "config": {
+                "name": "passthrough_string",
+                "base_path": "/ovms/src/test/passthrough_string",
+                "target_device": "CPU",
+                "model_version_policy": {"all": {}},
+                "nireq": 1
+            }
+        }
+    ],
+    "pipeline_config_list": [
+        {
+            "name": "pipe",
+            "inputs": ["pipeline_input"],
+            "nodes": [
+                {
+                    "name": "pipe_node",
+                    "model_name": "passthrough_string",
+                    "type": "DL model",
+                    "inputs": [
+                        {"my_name": {"node_name": "request",
+                                   "data_item": "pipeline_input"}}
+                    ],
+                    "outputs": [
+                        {"data_item": "my_name",
+                         "alias": "out"}
+                    ],
+                    "demultiply_count": 0
+                }
+            ],
+            "outputs": [
+                {"pipeline_output": {"node_name": "pipe_node",
+                                     "data_item": "out"}
+                }
+            ]
+        }
+    ]
+})";
+
+TEST_F(EnsembleFlowTest, PipelineWithStringDemultiplexerNodeUnsupported) {
+    std::string fileToReload = directoryPath + "/config.json";
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(pipelineSingleStringModelWithDemultiplexerNode), fileToReload);
+    ConstructorEnabledModelManager manager;
+
+    ASSERT_EQ(manager.loadConfig(fileToReload), StatusCode::PIPELINE_STRING_DEMUILTIPLICATION_UNSUPPORTED);
 }

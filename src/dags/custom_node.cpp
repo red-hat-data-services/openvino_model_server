@@ -15,6 +15,7 @@
 //*****************************************************************************
 #include "custom_node.hpp"
 
+#include <optional>
 #include <utility>
 
 #include "../custom_node_interface.h"  // NOLINT
@@ -41,7 +42,7 @@ CustomNode::CustomNode(
     parameters(parameters),
     nodeOutputNameAlias(nodeOutputNameAlias),
     libraryParameters(createCustomNodeParamArray(this->parameters)),
-    customNodeLibraryInternalManager(customNodeLibraryInternalManager) {
+    customNodeLibraryInternalManager(std::move(customNodeLibraryInternalManager)) {
 }
 
 Status CustomNode::execute(session_key_t sessionKey, PipelineEventQueue& notifyEndQueue) {

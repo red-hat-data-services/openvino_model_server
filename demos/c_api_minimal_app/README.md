@@ -31,8 +31,9 @@ make -f MakefileCapi cpp
 ```
 
 It will link the main_capi.cpp binary with the `libovms_shared.so` library from /ovms/lib and use the headers from /ovms/include directory:
-```
-g++ main_capi.cpp -I/ovms/include -L/ovms/lib -lovms_shared
+```bash
+g++ main_capi.cpp -I/ovms/include -L/ovms/lib -lovms_shared -o main_capi
+./main_capi
 ```
 
 The example output is:
@@ -91,7 +92,7 @@ run `make` command in ovms git main directory.
 ```bash
 git clone https://github.com/openvinotoolkit/model_server.git
 cd model_server
-make
+make BASE_OS=ubuntu24
 ```
 
 And then execute the alternative make target:
@@ -99,3 +100,69 @@ And then execute the alternative make target:
 cd demos/c_api_minimal_app
 make all_docker
 ```
+
+# Capi Benchmark
+
+This guide shows how to perform benchmark tests using OpenVINO Model Server C-API.
+It starts the model server and initiates a load from multithreaded clients sending sequential requests with synthetic data.
+It can demonstrate expected throughput and latency for a specific model, configuration and C-API calls.
+
+
+Clone OpenVINO™ Model Server GitHub repository and go to the top directory.
+```bash
+git clone https://github.com/openvinotoolkit/model_server.git
+cd model_server/demos/c_api_minimal_app
+```
+Build the tool
+```bash
+make
+```
+
+- Command
+```bash
+docker run openvino/model_server-capi:latest -c /ovms/bin/capi_benchmark
+OpenVINO Model Server
+Usage:
+  /ovms/bin/capi_benchmark [OPTION...]
+
+  -h, --help                    Show this help message and exit
+      --log_level LOG_LEVEL     serving log level - one of TRACE, DEBUG,
+                                INFO, WARNING, ERROR (default: ERROR)
+      --config_path CONFIG_PATH
+                                Config file path for OVMS to read (default:
+                                /ovms/src/test/configs/config_benchmark.json)
+      --niter NITER             number of inferences to conduct (default:
+                                1000)
+      --nstreams NSTREAMS       number of execution streams to be performed
+                                simultaneously (suggested for best
+                                throughput is NUM_STREAMS of a ovms model
+                                config) (default: 1)
+      --servable_name MODEL_NAME
+                                Model name to sent request to
+      --servable_version MODEL_VERSION
+                                workload threads per ireq, if not set
+                                version will be set by default model
+                                version policy (default: 0)
+      --mode MODE               Workload mode. Possible values:
+                                INFERENCE_ONLY, RESET_BUFFER, RESET_REQUEST
+                                (default: INFERENCE_ONLY)
+      --seed SEED               Random values generator seed.
+```
+
+## Available modes
+
+- INFERENCE_ONLY (default), measures only the time it takes to perform inferences using C-API
+- RESET_BUFFER, include time it takes to recreate inference request data buffer
+- RESET_REQUEST, include time it takes to recreate whole inference request 
+
+Perform the measurement using sample model, one can specify different model using `config_path` option and specifying desired config file.
+```bash
+docker run openvino/model_server-capi:latest -c '/ovms/bin/capi_benchmark --servable_name dummy --nstreams 12 --config_path /ovms/demos/config_benchmark.json'
+Mode requested: INFERENCE_ONLY
+Server ready for inference
+Benchmark starting workload
+FPS: 235128
+Average latency : 0.053ms
+main() exit
+```
+

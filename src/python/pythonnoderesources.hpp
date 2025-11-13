@@ -18,10 +18,18 @@
 #include <memory>
 #include <string>
 #include <unordered_map>
-
+#pragma warning(push)
+#pragma warning(disable : 6326 28182 6011 28020)
 #include <pybind11/embed.h>  // everything needed for embedding
+#pragma warning(pop)
 
-#include "src/mediapipe_calculators/python_executor_calculator_options.pb.h"
+#pragma warning(push)
+#pragma warning(disable : 4309 4005 6001 6011 6326 6385 6246 6386 6326 6011 4005 4456)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
+#include "mediapipe/framework/calculator_graph.h"
+#pragma GCC diagnostic pop
+#pragma warning(pop)
 
 namespace py = pybind11;
 
@@ -29,23 +37,25 @@ namespace ovms {
 class Status;
 class PythonBackend;
 
-struct PythonNodeResources {
+class PythonNodeResources {
 public:
     PythonNodeResources(const PythonNodeResources&) = delete;
     PythonNodeResources& operator=(PythonNodeResources&) = delete;
 
     std::unique_ptr<py::object> ovmsPythonModel;
     PythonBackend* pythonBackend;
-    std::string pythonNodeFilePath;
+    std::string handlerPath;
     std::unordered_map<std::string, std::string> outputsNameTagMapping;
 
     PythonNodeResources(PythonBackend* pythonBackend);
     ~PythonNodeResources();
-    static Status createPythonNodeResources(std::shared_ptr<PythonNodeResources>& nodeResources, const ::mediapipe::CalculatorGraphConfig::Node& graphNode, PythonBackend* pythonBackend);
+
+    static Status createPythonNodeResources(std::shared_ptr<PythonNodeResources>& nodeResources, const ::mediapipe::CalculatorGraphConfig::Node& graphNodeConfig, PythonBackend* pythonBackend, std::string graphPath);
+
     void finalize();
 
 private:
-    static py::dict preparePythonNodeInitializeArguments(const ::mediapipe::CalculatorGraphConfig::Node& graphNodeConfig);
+    static py::dict preparePythonNodeInitializeArguments(const ::mediapipe::CalculatorGraphConfig::Node& graphNodeConfig, const std::string& basePath);
 };
-
+using PythonNodeResourcesMap = std::unordered_map<std::string, std::shared_ptr<PythonNodeResources>>;
 }  // namespace ovms

@@ -16,6 +16,7 @@
 #pragma once
 
 #include <map>
+#include <optional>
 #include <string>
 
 #include <grpcpp/server_context.h>
@@ -32,7 +33,7 @@
 #include "modelversion.hpp"
 
 namespace ovms {
-class ExecutionContext;
+struct ExecutionContext;
 class ModelManager;
 class ModelVersionStatus;
 class Server;

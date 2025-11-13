@@ -20,6 +20,26 @@ load("@bazel_tools//tools/build_defs/repo:git.bzl", "git_repository")
 load("@bazel_tools//tools/build_defs/repo:git.bzl", "new_git_repository")
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
+# 2023-06-05
+# This version of Glog is required for Windows support, but currently causes
+# crashes on some Android devices.
+# OVMS - must be before MP
+http_archive(
+    name = "com_github_glog_glog_windows",
+    strip_prefix = "glog-3a0d4d22c5ae0b9a2216988411cfa6bf860cc372",
+    sha256 = "170d08f80210b82d95563f4723a15095eff1aad1863000e8eeb569c96a98fefb",
+    urls = [
+      "https://github.com/google/glog/archive/3a0d4d22c5ae0b9a2216988411cfa6bf860cc372.zip",
+    ],
+    patches = [
+        "@mediapipe//third_party:com_github_glog_glog.diff",
+        "@mediapipe//third_party:com_github_glog_glog_windows_patch.diff",
+    ],
+    patch_args = [
+        "-p1",
+    ],
+)
+
 http_archive(
     name = "bazel_skylib",
     sha256 = "74d544d96f4a5bb630d465ca8bbcfe231e3594e5aae57e1edbf17a6eb3ca2506",
@@ -33,32 +53,77 @@ bazel_skylib_workspace()
 load("@bazel_skylib//lib:versions.bzl", "versions")
 versions.check(minimum_bazel_version = "6.0.0")
 
+load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
+
+http_archive(
+    name = "rules_python",
+    sha256 = "0cc05ddb27614baecace068986931e2a6e9f69114e6115fc5dc58250faf56e0f",
+    strip_prefix = "rules_python-0.37.0",
+    url = "https://github.com/bazelbuild/rules_python/releases/download/0.37.0/rules_python-0.37.0.tar.gz",
+)
+
+load("@rules_python//python:repositories.bzl", "py_repositories")
+
+py_repositories()
+
+# ABSL on 2023-10-18
+# Needed for MP
+# https://github.com/google-ai-edge/mediapipe/commit/743cdb747332efdfb43338d92aa6349acc40a06a
+# patch for static_assert(ValidateAsciiCasefold() == 0, "error in case conversion");
+# needs to be before MP & TF
+git_repository(
+    name = "com_google_absl",
+    remote = "https://github.com/abseil/abseil-cpp",
+    commit = "9687a8ea750bfcddf790372093245a1d041b21a3", # MP image buildable original MP
+    patches = [
+        "@mediapipe//third_party:com_google_absl_windows_patch.diff",
+        "abseil_gcc_8.5_constant_expression.patch",
+    ],
+    patch_args = [
+        "-p1",
+    ],
+)
+
+http_archive(
+    name = "zlib",
+    build_file = "@mediapipe//third_party:zlib.BUILD",
+    sha256 = "9a93b2b7dfdac77ceba5a558a580e74667dd6fede4585b91eefb60f03b72df23",
+    strip_prefix = "zlib-1.3.1",
+    url = "http://zlib.net/fossils/zlib-1.3.1.tar.gz",
+)
+
+# RapidJSON
+# Must be defined earlier than tensorflow_serving because TFS is using older rapidjson
+# Version must match openvino.genai -> jinja2cpp -> rapidjson
+# git/Jinja2Cpp/thirdparty/internal_deps.cmake
+# Date:   Tue May 9 21:31:22 2023 +0000 Avoid ptrdiff between pointers to different allocations
+http_archive(
+    name = "com_github_tencent_rapidjson",
+    url = "https://github.com/Tencent/rapidjson/archive/973dc9c06dcd3d035ebd039cfb9ea457721ec213.tar.gz",
+    sha256 = "d0c9e52823d493206eb721d38cb3a669ca0212360862bd15a3c2f7d35ea7c6f7",
+    strip_prefix = "rapidjson-973dc9c06dcd3d035ebd039cfb9ea457721ec213",
+    build_file = "@//third_party/rapidjson:BUILD"
+)
+
+http_archive(
+    name = "com_github_libevent_libevent",
+    url = "https://github.com/libevent/libevent/archive/release-2.1.12-stable.zip",
+    sha256 = "8836ad722ab211de41cb82fe098911986604f6286f67d10dfb2b6787bf418f49",
+    strip_prefix = "libevent-release-2.1.12-stable",
+    build_file = "@//third_party/libevent:BUILD",
+)
+
 # overriding tensorflow serving bazel dependency
 # alternative would be to use cmake build of grpc and flag
 # to use system ssl instead
 new_local_repository(
     name = "boringssl",
     path = "/usr/",
-    build_file_content = """
-cc_library(
-    name = "ssl",
-    hdrs = glob(["include/openssl/*"]),
-    srcs = glob(["lib/x86_64-linux-gnu/libssl.so"]),
-    copts = ["-lcrypto", "-lssl"],
-    visibility = ["//visibility:public"],
+    build_file = "@//third_party/boringssl:BUILD",
 )
-cc_library(
-    name = "crypto",
-    hdrs = glob(["include/openssl/*"]),
-    srcs = glob(["lib/x86_64-linux-gnu/libssl.so"]),
-    copts = ["-lcrypto", "-lssl"],
-    visibility = ["//visibility:public"],
-)
-""",
-)
-# overriding GCS curl dependency to force using system provided openssl
+
 new_local_repository(
-    name = "libcurl",
+    name = "linux_curl",
     path = "/usr/",
     build_file_content = """
 cc_library(
@@ -70,17 +135,42 @@ cc_library(
 )
 """,
 )
+
+new_local_repository(
+    name = "windows_curl",
+    path = "C:\\opt\\curl-8.14.1_1-win64-mingw",
+    build_file_content = """
+cc_import(
+    name = "curl_lib",
+    hdrs = [],
+    shared_library = "bin/libcurl-x64.dll",
+    visibility = ["//visibility:public"],
+)
+cc_library(
+    name = "curl",
+    hdrs = glob(["include/curl/curl.h"]),
+    srcs = glob(["lib/libcurl.dll.a"]),
+    includes = ["include/"],
+    visibility = ["//visibility:public"],
+    deps = [":curl_lib"],
+)
+""",
+)
+
+
+# Used for gRPC API protos only
 # Tensorflow serving
 git_repository(
     name = "tensorflow_serving",
     remote = "https://github.com/tensorflow/serving.git",
-    tag = "2.13.0",
+    tag = "2.18.0",
     patch_args = ["-p1"],
-    patches = ["net_http.patch", "listen.patch"]
+    patches = ["net_http.patch", "listen.patch", "partial_2.18.patch"]
     #                             ^^^^^^^^^^^^
     #                       make bind address configurable
     #          ^^^^^^^^^^^^
-    #        allow all http methods
+    #        allow all http methods                ^^^^^^^^^
+    #                                        implements partial responses
 )
 
 ########################################################### Mediapipe
@@ -89,12 +179,12 @@ http_archive(
     sha256 = "87407cd28e7a9c95d9f61a098a53cf031109d451a7763e7dd1253abf8b4df422",
     strip_prefix = "protobuf-3.19.1",
     urls = ["https://github.com/protocolbuffers/protobuf/archive/v3.19.1.tar.gz"],
-    #patches = [
-    #    "@//third_party:com_google_protobuf_fixes.diff"
-    #],
-    #patch_args = [
-    #    "-p1",
-    #],
+    patches = [
+        "@mediapipe//third_party:com_google_protobuf_fixes.diff"
+    ],
+    patch_args = [
+        "-p1",
+    ],
 )
 
 ################################### Official/forked mediapipe repository #########
@@ -102,13 +192,13 @@ http_archive(
 git_repository(
     name = "mediapipe",
     remote = "https://github.com/openvinotoolkit/mediapipe",
-    commit = "b0a0e72b16c16b27187da566dee7ff57bfdcf499", # Adress & remove TODO's (#61)
+    commit = "742e351997b339ad50fc59bca6d9a73a596bd5ed", # main as of 28/08/2025
 )
 
 # DEV mediapipe 1 source - adjust local repository path for build
 #local_repository(
 #    name = "mediapipe",
-#    path = "/mediapipe/",
+#    path = "C:\\git\\mediapipe",
 #)
 
 # Protobuf for Node dependencies
@@ -163,10 +253,14 @@ http_archive(
     url = "https://github.com/gflags/gflags/archive/v2.2.2.zip",
 )
 
-git_repository(
+# 2020-08-21 SHA 3a0d4d22c5ae0b9a2216988411cfa6bf860cc372
+http_archive(
     name = "com_github_glog_glog",
-    remote = "https://github.com/google/glog",
-    tag = "v0.5.0",
+    strip_prefix = "glog-3a0d4d22c5ae0b9a2216988411cfa6bf860cc372",
+    sha256 = "170d08f80210b82d95563f4723a15095eff1aad1863000e8eeb569c96a98fefb",
+    urls = [
+        "https://github.com/google/glog/archive/3a0d4d22c5ae0b9a2216988411cfa6bf860cc372.zip",
+    ],
 )
 
 load("@mediapipe//third_party:external_files.bzl", "external_files")
@@ -179,22 +273,77 @@ new_local_repository(
 )
 
 new_local_repository(
+    name = "windows_openvino",
+    build_file = "@//third_party/openvino:openvino_windows.BUILD",
+    path = "C:\\opt\\openvino\\runtime",
+)
+
+new_local_repository(
+    name = "windows_genai",
+    build_file = "@//third_party/genai:genai_windows.BUILD",
+    path = "C:\\opt\\openvino\\runtime",
+)
+
+new_local_repository(
+    name = "linux_genai",
+    build_file = "@//third_party/genai:BUILD",
+    path = "/opt/intel/openvino/runtime",
+)
+
+new_local_repository(
     name = "linux_opencv",
     build_file = "@//third_party/opencv:BUILD",
     path = "/opt/opencv/",
+)
+
+new_local_repository(
+    name = "windows_opencv",
+    build_file = "@//third_party/opencv:opencv_windows.BUILD",
+    path = "C:\\opt\\opencv_4.12.0",
+)
+
+new_local_repository(
+    name = "windows_opencl",
+    build_file = "@//third_party/opencl:opencl_windows.BUILD",
+    path = "C:\\opt\\opencl\\external\\OpenCL-CLHPP",
+)
+
+new_local_repository(
+    name = "windows_opencl2",
+    build_file = "@//third_party/opencl:opencl_windows2.BUILD",
+    path = "C:\\opt\\opencl\\external\\OpenCL-Headers",
 )
 
 ########################################################### Mediapipe end
 
 ########################################################### Python support start
 
+http_archive(
+    name = "aspect_bazel_lib",
+    sha256 = "7b39d9f38b82260a8151b18dd4a6219d2d7fc4a0ac313d4f5a630ae6907d205d",
+    strip_prefix = "bazel-lib-2.10.0",
+    url = "https://github.com/bazel-contrib/bazel-lib/releases/download/v2.10.0/bazel-lib-v2.10.0.tar.gz",
+)
+
+load("@aspect_bazel_lib//lib:repositories.bzl", "register_coreutils_toolchains")
+register_coreutils_toolchains()
+
 load("@//third_party/python:python_repo.bzl", "python_repository")
 python_repository(name = "_python3-linux")
+
+load("@//third_party/python:python_repo_win.bzl", "python_repository")
+python_repository(name = "_python3-windows")
 
 new_local_repository(
     name = "python3_linux",
     path = "/usr",
     build_file = "@_python3-linux//:BUILD"
+)
+
+new_local_repository(
+    name = "python3_windows",
+    path = "C:\\opt\\",
+    build_file = "@_python3-windows//:BUILD"
 )
 
 http_archive(
@@ -212,22 +361,14 @@ http_archive(
 load("@pybind11_bazel//:python_configure.bzl", "python_configure")
 python_configure(name = "local_config_python")
 
-http_archive(
-    name = "rules_python",
-    sha256 = "29a801171f7ca190c543406f9894abf2d483c206e14d6acbd695623662320097",
-    strip_prefix = "rules_python-0.18.1",
-    url = "https://github.com/bazelbuild/rules_python/releases/download/0.18.1/rules_python-0.18.1.tar.gz",
-)
-
 load("@rules_python//python:repositories.bzl", "py_repositories")
-
 py_repositories()
 
 load("@rules_python//python:pip.bzl", "pip_parse")
 
 pip_parse(
     name = "pip_deps",
-    requirements_lock = "//src:bindings/python/tests/requirements.txt",
+    requirements_lock = "//src/python/binding:tests/requirements.txt",
 )
 
 load("@pip_deps//:requirements.bzl", "install_deps")
@@ -253,30 +394,37 @@ cc_library(
 """,
 )
 
-#load("@tensorflow_serving//tensorflow_serving:repo.bzl", "tensorflow_http_archive")
-#tensorflow_http_archive(
-#    name = "org_tensorflow",
-#    sha256 = "fd687f8e26833cb917ae0bd8e434c9bd30c92042361c8ae69679983d3c66a440",
-#    git_commit = "15198b1818bd2bf1b5b55bf5b02bf42398d222fc",
-#    patch = "tf.patch",
-#    repo_mapping = {"@curl" : "@curl"}
-#)
+# We need to override upb due to false positive stringop-truncation warning
+# second patch is needed & copied from TF
+http_archive(
+    name = "upb",
+    sha256 = "61d0417abd60e65ed589c9deee7c124fe76a4106831f6ad39464e1525cef1454",
+    strip_prefix = "upb-9effcbcb27f0a665f9f345030188c0b291e32482",
+    patches = [
+            "upb_platform_fix.patch",
+            "upb_warning_turn_off.patch"
+    ],
+    patch_args = [
+        "-p1",
+    ],
+    urls = ["https://github.com/protocolbuffers/upb/archive/9effcbcb27f0a665f9f345030188c0b291e32482.tar.gz"],
+)
 
 # TensorFlow repo should always go after the other external dependencies.
-# TF on 2023-06-13.
-_TENSORFLOW_GIT_COMMIT = "491681a5620e41bf079a582ac39c585cc86878b9"
-_TENSORFLOW_SHA256 = "9f76389af7a2835e68413322c1eaabfadc912f02a76d71dc16be507f9ca3d3ac"
+# TF on 2024-09-24 same as in Mediapipe
+_TENSORFLOW_GIT_COMMIT = "5329ec8dd396487982ef3e743f98c0195af39a6b"
+_TENSORFLOW_SHA256 = "eb1f8d740d59ea3dee91108ab1fc19d91c4e9ac2fd17d9ab86d865c3c43d81c9"
 http_archive(
     name = "org_tensorflow",
     urls = [
       "https://github.com/tensorflow/tensorflow/archive/%s.tar.gz" % _TENSORFLOW_GIT_COMMIT,
     ],
     patches = [
-        "@mediapipe//third_party:org_tensorflow_compatibility_fixes.diff",
-        # Diff is generated with a script, don't update it manually.
+        "@mediapipe//third_party:org_tensorflow_c_api_experimental.diff",
         "@mediapipe//third_party:org_tensorflow_custom_ops.diff",
-        "tf.patch",
-        "tf_graph_info_multilinecomment.patch",
+        "@mediapipe//third_party:org_tensorflow_objc_build_fixes.diff",
+        "tf_2.18_logging.patch",
+        "tf_nsync_chrono.patch",
     ],
     patch_args = [
         "-p1",
@@ -287,11 +435,37 @@ http_archive(
 )
 
 load("@tensorflow_serving//tensorflow_serving:workspace.bzl", "tf_serving_workspace")
-tf_serving_workspace()
 
 # Initialize TensorFlow's external dependencies.
 load("@org_tensorflow//tensorflow:workspace3.bzl", "workspace")
 workspace()
+# Initialize hermetic Python
+load("@org_tensorflow//third_party/xla/third_party/py:python_init_rules.bzl", "python_init_rules")
+python_init_rules()
+
+load("@org_tensorflow//third_party/xla/third_party/py:python_init_repositories.bzl", "python_init_repositories")
+python_init_repositories(
+    default_python_version = "system",
+    local_wheel_dist_folder = "dist",
+    requirements = {
+        "3.9": "@mediapipe//:requirements_lock.txt",
+        "3.10": "@mediapipe//:requirements_lock_3_10.txt",
+        "3.11": "@mediapipe//:requirements_lock_3_11.txt",
+        "3.12": "@mediapipe//:requirements_lock_3_12.txt",
+    },
+    #local_wheel_inclusion_list = ["mediapipe*"],
+    #local_wheel_workspaces = ["//:WORKSPACE"],
+)
+
+load("@org_tensorflow//third_party/xla/third_party/py:python_init_toolchains.bzl", "python_init_toolchains")
+python_init_toolchains()
+
+load("@org_tensorflow//third_party/xla/third_party/py:python_init_pip.bzl", "python_init_pip")
+python_init_pip()
+
+load("@pypi//:requirements.bzl", "install_deps")
+install_deps()
+# End hermetic Python initialization
 load("@org_tensorflow//tensorflow:workspace2.bzl", "workspace")
 workspace()
 load("@org_tensorflow//tensorflow:workspace1.bzl", "workspace")
@@ -299,16 +473,33 @@ workspace()
 load("@org_tensorflow//tensorflow:workspace0.bzl", "workspace")
 workspace()
 
+tf_serving_workspace() #moved past TF
+# required after update to mp 0.10.18
+load(
+    "@org_tensorflow//third_party/gpus/cuda/hermetic:cuda_configure.bzl",
+    "cuda_configure",
+)
+cuda_configure(name = "local_config_cuda")
+
+
+
 # Initialize bazel package rules' external dependencies.
 load("@rules_pkg//:deps.bzl", "rules_pkg_dependencies")
 rules_pkg_dependencies()
 
-# AWS S3 SDK
-new_local_repository(
-    name = "awssdk",
-    build_file = "@//third_party/aws:BUILD",
-    path = "/awssdk",
-)
+load("@//third_party/aws-sdk-cpp:aws-sdk-cpp.bzl", "aws_sdk_cpp")
+aws_sdk_cpp()
+
+### OpenVINO GenAI
+load("@//third_party/llm_engine:llm_engine.bzl", "llm_engine")
+llm_engine()
+
+### Libgit2
+load("@//third_party/libgit2:libgit2_engine.bzl", "libgit2_engine")
+libgit2_engine()
+
+load("@//third_party/drogon:drogon.bzl", "drogon_cpp")
+drogon_cpp()
 
 # Azure Storage SDK
 new_local_repository(
@@ -334,72 +525,73 @@ new_local_repository(
 
 # Google Cloud SDK
 http_archive(
-    name = "com_github_googleapis_google_cloud_cpp",
-    sha256 = "a370bcf2913717c674a7250c4a310250448ffeb751b930be559a6f1887155f3b",
-    strip_prefix = "google-cloud-cpp-0.21.0",
-    url = "https://github.com/googleapis/google-cloud-cpp/archive/v0.21.0.tar.gz",
+    name = "google_cloud_cpp",
+    sha256 = "629cbfcc5bd581d38277ba8fa94a5b6591af1e0f6af0dab6d1d9ed796bf48b61",
+    strip_prefix = "google-cloud-cpp-2.39.0",
+    url = "https://github.com/googleapis/google-cloud-cpp/archive/v2.39.0.tar.gz",
     repo_mapping = {"@com_github_curl_curl" : "@curl"}
 )
 
-load("@com_github_googleapis_google_cloud_cpp//bazel:google_cloud_cpp_deps.bzl", "google_cloud_cpp_deps")
-google_cloud_cpp_deps()
+load("@google_cloud_cpp//bazel:workspace0.bzl", "gl_cpp_workspace0")
 
-load("@com_google_googleapis//:repository_rules.bzl", "switched_rules_by_language")
-switched_rules_by_language(
-    name = "com_google_googleapis_imports",
-    cc = True,  # C++ support is only "Partially implemented", roll our own.
-    grpc = True,
-)
+gl_cpp_workspace0()
 
-load("@com_github_googleapis_google_cloud_cpp_common//bazel:google_cloud_cpp_common_deps.bzl", "google_cloud_cpp_common_deps")
-google_cloud_cpp_common_deps()
+load("@google_cloud_cpp//bazel:workspace1.bzl", "gl_cpp_workspace1")
+
+gl_cpp_workspace1()
+
+load("@google_cloud_cpp//bazel:workspace2.bzl", "gl_cpp_workspace2")
+
+gl_cpp_workspace2()
+
+load("@google_cloud_cpp//bazel:workspace4.bzl", "gl_cpp_workspace4")
+
+gl_cpp_workspace4()
+
+load("@google_cloud_cpp//bazel:workspace5.bzl", "gl_cpp_workspace5")
+
+gl_cpp_workspace5()
+
+# grpc
 
 load("@com_github_grpc_grpc//bazel:grpc_deps.bzl", "grpc_deps")
 grpc_deps()
+http_archive( # 1.74.1
+    name = "com_github_grpc_grpc",
+    urls = [
+        "https://github.com/grpc/grpc/archive/893bdadd56dbb75fb156175afdaa2b0d47e1c15b.tar.gz",
+    ],
+    strip_prefix = "grpc-893bdadd56dbb75fb156175afdaa2b0d47e1c15b",
+)
 
 # cxxopts
 http_archive(
     name = "com_github_jarro2783_cxxopts",
-    url = "https://github.com/jarro2783/cxxopts/archive/v2.2.0.zip",
-    sha256 = "f9640c00d9938bedb291a21f9287902a3a8cee38db6910b905f8eba4a6416204",
-    strip_prefix = "cxxopts-2.2.0",
+    url = "https://github.com/jarro2783/cxxopts/archive/v3.1.1.zip",
+    sha256 = "25b644a2bfa9c6704d723be51b026bc02420dfdee1277a49bfe5df3f19b0eaa4",
+    strip_prefix = "cxxopts-3.1.1",
     build_file = "@//third_party/cxxopts:BUILD",
-)
-
-# RapidJSON
-http_archive(
-    name = "com_github_tencent_rapidjson",
-    url = "https://github.com/Tencent/rapidjson/archive/v1.1.0.zip",
-    sha256 = "8e00c38829d6785a2dfb951bb87c6974fa07dfe488aa5b25deec4b8bc0f6a3ab",
-    strip_prefix = "rapidjson-1.1.0",
-    build_file = "@//third_party/rapidjson:BUILD"
 )
 
 # spdlog
 http_archive(
     name = "com_github_gabime_spdlog",
-    url = "https://github.com/gabime/spdlog/archive/v1.4.0.tar.gz",
-    sha256 = "afd18f62d1bc466c60bef088e6b637b0284be88c515cedc59ad4554150af6043",
-    strip_prefix = "spdlog-1.4.0",
+    urls = [ 
+        "https://github.com/gabime/spdlog/archive/refs/tags/v1.15.3.tar.gz",
+        "https://mirror.bazel.build/github.com/gabime/spdlog/archive/refs/tags/v1.15.3.tar.gz",
+    ],
+    sha256 = "15a04e69c222eb6c01094b5c7ff8a249b36bb22788d72519646fb85feb267e67",
+    strip_prefix = "spdlog-1.15.3",
     build_file = "@//third_party/spdlog:BUILD"
 )
 
 # fmtlib
 http_archive(
     name = "fmtlib",
-    url = "https://github.com/fmtlib/fmt/archive/6.0.0.tar.gz",
-    sha256 = "f1907a58d5e86e6c382e51441d92ad9e23aea63827ba47fd647eacc0d3a16c78",
-    strip_prefix = "fmt-6.0.0",
+    url = "https://github.com/fmtlib/fmt/archive/refs/tags/11.2.0.tar.gz",
+    sha256 = "bc23066d87ab3168f27cef3e97d545fa63314f5c79df5ea444d41d56f962c6af",
+    strip_prefix = "fmt-11.2.0",
     build_file = "@//third_party/fmtlib:BUILD"
-)
-
-# libevent
-http_archive(
-    name = "com_github_libevent_libevent",
-    url = "https://github.com/libevent/libevent/archive/release-2.1.8-stable.zip",
-    sha256 = "70158101eab7ed44fd9cc34e7f247b3cae91a8e4490745d9d6eb7edc184e4d96",
-    strip_prefix = "libevent-release-2.1.8-stable",
-    build_file = "@//third_party/libevent:BUILD",
 )
 
 # prometheus-cpp
@@ -412,25 +604,39 @@ load("@com_github_jupp0r_prometheus_cpp//bazel:repositories.bzl", "prometheus_cp
 prometheus_cpp_repositories()
 
 load("@rules_foreign_cc//foreign_cc:cmake.bzl", "cmake")
-load("@mediapipe//third_party/model_api:model_api.bzl", "model_api_repository")
-model_api_repository(name="_model-api")
-new_git_repository(
-    name = "model_api",
-    remote = "https:///github.com/openvinotoolkit/model_api/",
-    build_file = "@_model-api//:BUILD",
-    commit = "03a6cee5d486ee9eabb625e4388e69fe9c50ef20"
-)
-
-git_repository(
-    name = "oneTBB",
-    branch = "v2021.10.0", # need newer version to be compatible with bazel 6.0
-    remote = "https://github.com/oneapi-src/oneTBB/",
-    patch_args = ["-p1"],
-    patches = ["mwaitpkg.patch",]
-)
+load("@mediapipe//third_party/model_api:model_api.bzl", "workspace_model_api")
+workspace_model_api()
 
 new_local_repository(
     name = "mediapipe_calculators",
     build_file = "@//third_party/mediapipe_calculators:BUILD",
-    path = "/ovms/third_party/mediapipe_calculators",
+    path = "third_party/mediapipe_calculators",
+)
+
+git_repository(
+    name = "nlohmann_json",
+    remote = "https://github.com/nlohmann/json/",
+    tag = "v3.11.3",
+)
+# for rest client in unit tests (server_test.cpp)
+git_repository(
+    name = "cpp_httplib",
+    remote = "https://github.com/yhirose/cpp-httplib/",
+    tag = "v0.18.7",
+    build_file = "@//third_party/cpp-httplib:BUILD"
+)
+
+new_git_repository(
+    name = "stb",
+    remote = "https://github.com/nothings/stb",
+    commit = "5c205738c191bcb0abc65c4febfa9bd25ff35234",
+    build_file_content = """
+cc_library(
+    name = "image",
+    hdrs = ["stb_image.h", "stb_image_write.h"],
+    visibility = ["//visibility:public"],
+    local_defines = [
+    ],
+)
+""",
 )

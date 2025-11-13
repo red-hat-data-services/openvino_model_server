@@ -22,25 +22,31 @@
 #include <unordered_map>
 #include <vector>
 
+#include "deserialization.hpp"
+#include "kfs_utils.hpp"
+#include "kfs_request_utils.hpp"
 #include "../dags/pipeline.hpp"
 #include "../dags/pipelinedefinition.hpp"
 #include "../dags/pipelinedefinitionstatus.hpp"
 #include "../dags/pipelinedefinitionunloadguard.hpp"
-#include "../deserialization.hpp"
 #include "../execution_context.hpp"
 #include "../grpc_utils.hpp"
-#include "../kfs_frontend/kfs_utils.hpp"
 #if (MEDIAPIPE_DISABLE == 0)
+// clang-format off
+// kfs_graph_executor_impl needs to be included before mediapipegraphexecutor
+// because it contains functions required by graph execution template
+#include "kfs_graph_executor_impl.hpp"
 #include "../mediapipe_internal/mediapipegraphdefinition.hpp"
 #include "../mediapipe_internal/mediapipegraphexecutor.hpp"
+// clang-format on
 #endif
 #include "../metric.hpp"
 #include "../modelinstance.hpp"
+#include "../deserialization_main.hpp"
+#include "../inference_executor.hpp"
 #include "../modelinstanceunloadguard.hpp"
 #include "../modelmanager.hpp"
 #include "../ovinferrequestsqueue.hpp"
-#include "../prediction_service_utils.hpp"
-#include "../serialization.hpp"
 #include "../servablemanagermodule.hpp"
 #include "../server.hpp"
 #include "../status.hpp"
@@ -88,7 +94,7 @@ const std::string PLATFORM = "OpenVINO";
     (void)context;
     (void)request;
     (void)response;
-    bool isLive = this->ovmsServer.isLive();
+    bool isLive = this->ovmsServer.isLive(GRPC_SERVER_MODULE_NAME);
     SPDLOG_DEBUG("Requested Server liveness state: {}", isLive);
     response->set_live(isLive);
     return grpc::Status::OK;
@@ -122,7 +128,7 @@ Status KFSInferenceServiceImpl::getModelReady(const KFSGetModelStatusRequest* re
                 return StatusCode::MODEL_NAME_MISSING;
             }
             auto status = buildResponse(*mediapipeGraphDefinition, response);
-            // INCREMENT_IF_ENABLED(pipelineDefinition->getMetricReporter().getModelReadyMetric(executionContext, status.ok())); TODO metrics
+            INCREMENT_IF_ENABLED(mediapipeGraphDefinition->getMetricReporter().getModelReadyMetric(executionContext, status.ok()));
             return status;
 #else
             return StatusCode::MODEL_NAME_MISSING;
@@ -184,10 +190,11 @@ Status KFSInferenceServiceImpl::ServerMetadataImpl(::grpc::ServerContext* contex
 }
 
 ::grpc::Status KFSInferenceServiceImpl::ModelMetadata(::grpc::ServerContext* context, const KFSModelMetadataRequest* request, KFSModelMetadataResponse* response) {
-    return grpc(ModelMetadataImpl(context, request, response, ExecutionContext{ExecutionContext::Interface::GRPC, ExecutionContext::Method::ModelMetadata}));
+    KFSModelExtraMetadata extraMetadata;
+    return grpc(ModelMetadataImpl(context, request, response, ExecutionContext{ExecutionContext::Interface::GRPC, ExecutionContext::Method::ModelMetadata}, extraMetadata));
 }
 
-Status KFSInferenceServiceImpl::ModelMetadataImpl(::grpc::ServerContext* context, const KFSModelMetadataRequest* request, KFSModelMetadataResponse* response, ExecutionContext executionContext) {
+Status KFSInferenceServiceImpl::ModelMetadataImpl(::grpc::ServerContext* context, const KFSModelMetadataRequest* request, KFSModelMetadataResponse* response, ExecutionContext executionContext, KFSModelExtraMetadata& extraMetadata) {
     const auto& name = request->name();
     const auto& versionString = request->version();
 
@@ -204,7 +211,7 @@ Status KFSInferenceServiceImpl::ModelMetadataImpl(::grpc::ServerContext* context
                 return StatusCode::MODEL_NAME_MISSING;
             }
             auto status = buildResponse(*mediapipeGraphDefinition, response);
-            // INCREMENT_IF_ENABLED(pipelineDefinition->getMetricReporter().getModelReadyMetric(executionContext, status.ok())); TODO metrics
+            INCREMENT_IF_ENABLED(mediapipeGraphDefinition->getMetricReporter().getModelMetadataMetric(executionContext, status.ok()));
             return status;
 #else
             return Status(StatusCode::MODEL_NAME_MISSING);
@@ -238,7 +245,8 @@ Status KFSInferenceServiceImpl::ModelMetadataImpl(::grpc::ServerContext* context
             return Status(StatusCode::MODEL_VERSION_MISSING);
         }
     }
-    auto status = buildResponse(*model, *instance, response);
+    auto status = buildResponse(*model, *instance, response, extraMetadata);
+
     INCREMENT_IF_ENABLED(instance->getMetricReporter().getModelMetadataMetric(executionContext, status.ok()));
 
     return status;
@@ -271,13 +279,13 @@ Status KFSInferenceServiceImpl::ModelMetadataImpl(::grpc::ServerContext* context
     SPDLOG_DEBUG("Total gRPC request processing time: {} ms", requestTotal / 1000);
     if (!reporter) {
         return grpc(Status(StatusCode::OK));
-        // TODO fix after Mediapipe metrics implementation
+        // There is no request time metric for MediaPipe endpoints
     }
     OBSERVE_IF_ENABLED(reporter->requestTimeGrpc, requestTotal);
     return grpc(status);
 }
 
-::grpc::Status KFSInferenceServiceImpl::ModelStreamInfer(::grpc::ServerContext* context, ::grpc::ServerReaderWriter<::inference::ModelStreamInferResponse, ::inference::ModelInferRequest>* stream) {
+::grpc::Status KFSInferenceServiceImpl::ModelStreamInfer(::grpc::ServerContext* context, ::grpc::ServerReaderWriter<::inference::ModelStreamInferResponse, KFSRequest>* stream) {
     return grpc(ModelStreamInferImpl(context, stream));
 }
 
@@ -296,11 +304,11 @@ Status KFSInferenceServiceImpl::ModelInferImpl(::grpc::ServerContext* context, c
             SPDLOG_DEBUG("Requested DAG: {} does not exist. Searching for mediapipe graph with that name...", request->model_name());
 #if (MEDIAPIPE_DISABLE == 0)
             std::shared_ptr<MediapipeGraphExecutor> executor;
-            status = this->modelManager.createPipeline(executor, request->model_name(), request, response);
+            status = this->modelManager.createPipeline(executor, request->model_name());
             if (!status.ok()) {
                 return status;
             }
-            status = executor->infer(request, response, executionContext, reporterOut);
+            status = executor->infer(request, response, executionContext);
             return status;
 #else
             SPDLOG_DEBUG("Requested DAG: {} does not exist. Mediapipe support was disabled during build process...", request->model_name());
@@ -309,7 +317,7 @@ Status KFSInferenceServiceImpl::ModelInferImpl(::grpc::ServerContext* context, c
     }
     if (!status.ok()) {
         if (modelInstance) {
-            INCREMENT_IF_ENABLED(modelInstance->getMetricReporter().requestFailGrpcModelInfer);
+            INCREMENT_IF_ENABLED(modelInstance->getMetricReporter().getInferRequestMetric(executionContext, status.ok()));
         }
         SPDLOG_DEBUG("Getting modelInstance or pipeline failed. {}", status.string());
         return status;
@@ -319,7 +327,7 @@ Status KFSInferenceServiceImpl::ModelInferImpl(::grpc::ServerContext* context, c
         status = pipelinePtr->execute(executionContext);
     } else if (modelInstance) {
         reporterOut = &modelInstance->getMetricReporter();
-        status = modelInstance->infer(request, response, modelInstanceUnloadGuard);
+        status = infer(*modelInstance, request, response, modelInstanceUnloadGuard);
     }
     INCREMENT_IF_ENABLED(reporterOut->getInferRequestMetric(executionContext, status.ok()));
     if (!status.ok()) {
@@ -329,21 +337,22 @@ Status KFSInferenceServiceImpl::ModelInferImpl(::grpc::ServerContext* context, c
     return StatusCode::OK;
 }
 
-Status KFSInferenceServiceImpl::ModelStreamInferImpl(::grpc::ServerContext* context, ::grpc::ServerReaderWriterInterface<::inference::ModelStreamInferResponse, ::inference::ModelInferRequest>* stream) {
+Status KFSInferenceServiceImpl::ModelStreamInferImpl(::grpc::ServerContext* context, ::grpc::ServerReaderWriterInterface<::inference::ModelStreamInferResponse, KFSRequest>* serverReaderWriter) {
     OVMS_PROFILE_FUNCTION();
 #if (MEDIAPIPE_DISABLE == 0)
-    ::inference::ModelInferRequest firstRequest;
-    if (!stream->Read(&firstRequest)) {
+    KFSRequest firstRequest;
+    if (!serverReaderWriter->Read(&firstRequest)) {
         Status status = StatusCode::MEDIAPIPE_UNINITIALIZED_STREAM_CLOSURE;
         SPDLOG_DEBUG(status.string());
         return status;
     }
     std::shared_ptr<MediapipeGraphExecutor> executor;
-    auto status = this->modelManager.createPipeline(executor, firstRequest.model_name(), &firstRequest, nullptr /* response not present in streaming api */);
+    auto status = this->modelManager.createPipeline(executor, firstRequest.model_name());
     if (!status.ok()) {
         return status;
     }
-    return executor->inferStream(firstRequest, *stream);
+    ExecutionContext executionContext{ExecutionContext::Interface::GRPC, ExecutionContext::Method::ModelInferStream};
+    return executor->inferStream(firstRequest, *serverReaderWriter, executionContext);
 #else
     SPDLOG_DEBUG("Mediapipe support was disabled during build process...");
     return StatusCode::NOT_IMPLEMENTED;
@@ -380,10 +389,16 @@ Status KFSInferenceServiceImpl::buildResponse(
 #endif
 
 static void addReadyVersions(Model& model,
+    model_version_t versionAvailableDuringInitialCheck,
     KFSModelMetadataResponse* response) {
     auto modelVersions = model.getModelVersionsMapCopy();
     for (auto& [modelVersion, modelInstance] : modelVersions) {
-        if (modelInstance.getStatus().getState() == ModelVersionState::AVAILABLE)
+        // even if we have modelUnloadGuard model can have already state set to LOADING/UNLOADING
+        // here we make choice to report it as AVAILABLE even if it is already in different state
+        // since we managed to obtain guard. Model could change state after sending response anyway.
+        // Otherwise we could respond with metadata of one version but in response send information
+        // that different version is ready
+        if ((modelVersion == versionAvailableDuringInitialCheck) || (modelInstance.getStatus().getState() == ModelVersionState::AVAILABLE))
             response->add_versions(std::to_string(modelVersion));
     }
 }
@@ -391,7 +406,8 @@ static void addReadyVersions(Model& model,
 Status KFSInferenceServiceImpl::buildResponse(
     Model& model,
     ModelInstance& instance,
-    KFSModelMetadataResponse* response) {
+    KFSModelMetadataResponse* response,
+    KFSModelExtraMetadata& extraMetadata) {
 
     std::unique_ptr<ModelInstanceUnloadGuard> unloadGuard;
 
@@ -400,10 +416,10 @@ Status KFSInferenceServiceImpl::buildResponse(
     if (!status.ok()) {
         return status;
     }
-
+    extraMetadata.rt_info = instance.getRTInfo();
     response->Clear();
     response->set_name(instance.getName());
-    addReadyVersions(model, response);
+    addReadyVersions(model, instance.getVersion(), response);
     response->set_platform(PLATFORM);
 
     for (const auto& input : instance.getInputsInfo()) {
@@ -413,7 +429,6 @@ Status KFSInferenceServiceImpl::buildResponse(
     for (const auto& output : instance.getOutputsInfo()) {
         convert(output, response->add_outputs());
     }
-
     return StatusCode::OK;
 }
 

@@ -1,5 +1,5 @@
 #
-# Copyright (c) 2020-2022 Intel Corporation
+# Copyright (c) 2020 Intel Corporation
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -11,8 +11,7 @@
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
-# limitations under the License.
-#
+# limitations under the License.got
 
 # workaround for docker clipping build step logs
 BUILDKIT_STEP_LOG_MAX_SIZE=500000000
@@ -20,13 +19,15 @@ BUILDKIT_STEP_LOG_MAX_SPEED=10000000
 
 VIRTUALENV_EXE := python3 -m virtualenv -p python3
 VIRTUALENV_DIR := .venv
+VIRTUALENV_STYLE_DIR := .venv-style
 ACTIVATE="$(VIRTUALENV_DIR)/bin/activate"
+ACTIVATE_STYLE="$(VIRTUALENV_STYLE_DIR)/bin/activate"
 STYLE_CHECK_OPTS := --extensions=hpp,cc,cpp,h \
 	--output=vs7 \
 	--recursive \
 	--linelength=120 \
 	--filter=-build/c++11,-runtime/references,-whitespace/braces,-whitespace/indent,-build/include_order,-runtime/indentation_namespace,-build/namespaces,-whitespace/line_length,-runtime/string,-readability/casting,-runtime/explicit,-readability/todo
-STYLE_CHECK_DIRS := src demos/common/cpp/src demos/image_classification/cpp demos/benchmark/cpp
+STYLE_CHECK_DIRS := src
 HTTP_PROXY := "$(http_proxy)"
 HTTPS_PROXY := "$(https_proxy)"
 NO_PROXY := "$(no_proxy)"
@@ -43,38 +44,47 @@ JOBS ?= $(CORES_TOTAL)
 
 
 # Image on which OVMS is compiled. If DIST_OS is not set, it's also used for a release image.
-# Currently supported BASE_OS values are: ubuntu20 ubuntu22 redhat
-BASE_OS ?= ubuntu22
+# Currently supported BASE_OS values are: ubuntu24 ubuntu22 redhat
+BASE_OS ?= ubuntu24
 
 # do not change this; change versions per OS a few lines below (BASE_OS_TAG_*)!
 BASE_OS_TAG ?= latest
 
-BASE_OS_TAG_UBUNTU ?= 20.04
-BASE_OS_TAG_REDHAT ?= 8.8
+BASE_OS_TAG_UBUNTU ?= 24.04
+BASE_OS_TAG_REDHAT ?= 9.6
 
 INSTALL_RPMS_FROM_URL ?=
-
+BUILD_IMAGE ?= build
 CHECK_COVERAGE ?=0
-RUN_TESTS ?= 1
-NVIDIA ?=0
+RUN_TESTS ?= 0
+BUILD_TESTS ?= 0
+RUN_GPU_TESTS ?=
 GPU ?= 0
+NPU ?= 0
 BUILD_NGINX ?= 0
 MEDIAPIPE_DISABLE ?= 0
 PYTHON_DISABLE ?= 0
+ifeq ($(MEDIAPIPE_DISABLE),1)
+ifeq ($(PYTHON_DISABLE),0)
+$(error PYTHON_DISABLE cannot be 0 when MEDIAPIPE_DISABLE is 1)
+endif
+endif
 FUZZER_BUILD ?= 0
 
 # NOTE: when changing any value below, you'll need to adjust WORKSPACE file by hand:
 #         - uncomment source build section, comment binary section
 #         - adjust binary version path - version variable is not passed to WORKSPACE file!
-OV_SOURCE_BRANCH ?= ceeafaf64f346c6f14a67c612e131da5c27ef620  # 2023.3
-OV_CONTRIB_BRANCH ?= a6a2545ecdef580a121dedecb24de0d801aee5e5  # 2023.3
+OV_SOURCE_BRANCH ?= 44526285f241251e9543276572676365fbe542a4 # releases/2025/3 RC2
+OV_CONTRIB_BRANCH ?= c39462ca8d7c550266dc70cdbfbe4fc8c5be0677  # master / 2024-10-31
+OV_TOKENIZERS_BRANCH ?= 57f278c846843a0c4b61d18a50496b088d7df2d4 # releases/2025/3 RC2
 
 OV_SOURCE_ORG ?= openvinotoolkit
 OV_CONTRIB_ORG ?= openvinotoolkit
 
-SENTENCEPIECE ?= 1
+TEST_LLM_PATH ?= "src/test/llm_testing"
+GPU_MODEL_PATH ?= "/tmp/face_detection_adas"
 
-OV_USE_BINARY ?= 0
+OV_USE_BINARY ?= 1
 APT_OV_PACKAGE ?= openvino-2022.1.0
 # opt, dbg:
 BAZEL_BUILD_TYPE ?= opt
@@ -83,30 +93,32 @@ MINITRACE ?= OFF
 OV_TRACING_ENABLE ?= 0
 
 ifeq ($(MEDIAPIPE_DISABLE),1)
-	DISABLE_MEDIAPIPE_PARAMS = " --define MEDIAPIPE_DISABLE=1 --cxxopt=-DMEDIAPIPE_DISABLE=1"
+	DISABLE_MEDIAPIPE_PARAMS = " --define MEDIAPIPE_DISABLE=1"
 else
-	DISABLE_MEDIAPIPE_PARAMS = " --define MEDIAPIPE_DISABLE=0 --cxxopt=-DMEDIAPIPE_DISABLE=0"
+	DISABLE_MEDIAPIPE_PARAMS = " --define MEDIAPIPE_DISABLE=0"
 endif
 
-ifeq ($(PYTHON_DISABLE),1)
-	DISABLE_PYTHON_PARAMS = " --define PYTHON_DISABLE=1 --cxxopt=-DPYTHON_DISABLE=1"
+ifeq ($(MEDIAPIPE_DISABLE),1)
+  DISABLE_PARAMS = " --config=mp_off_py_off"
 else
-	DISABLE_PYTHON_PARAMS = " --define PYTHON_DISABLE=0 --cxxopt=-DPYTHON_DISABLE=0"
+  ifeq ($(PYTHON_DISABLE),1)
+    DISABLE_PARAMS = " --config=mp_on_py_off"
+  else
+    DISABLE_PARAMS = " --config=mp_on_py_on"
+  endif
 endif
 
 FUZZER_BUILD_PARAMS ?= ""
 ifeq ($(FUZZER_BUILD),1)
-	FUZZER_BUILD_PARAMS = " --define FUZZER_BUILD=1 --cxxopt=-DFUZZER_BUILD=1"
+	FUZZER_BUILD_PARAMS = " --define FUZZER_BUILD=1"
 endif
 
 STRIP = "always"
 BAZEL_DEBUG_BUILD_FLAGS ?= ""
 ifeq ($(BAZEL_BUILD_TYPE),dbg)
-    BAZEL_DEBUG_BUILD_FLAGS = " --copt=-g -c dbg"
-	STRIP = "never"
+  BAZEL_DEBUG_BUILD_FLAGS = " --copt=-g -c dbg"
+  STRIP = "never"
 endif
-
-CAPI_FLAGS = "--strip=always --define MEDIAPIPE_DISABLE=1 --cxxopt=-DMEDIAPIPE_DISABLE=1 --define PYTHON_DISABLE=1 --cxxopt=-DPYTHON_DISABLE=1"
 
 ifeq ($(MINITRACE),ON)
   MINITRACE_FLAGS=" --copt=-DMTR_ENABLED"
@@ -115,13 +127,20 @@ else
 endif
 
 ifeq ($(OV_TRACING_ENABLE),1)
-	OV_TRACING_PARAMS = " --cxxopt=-DOV_TRACING=1"
+  OV_TRACING_PARAMS = " --define OV_TRACE=1"
 else
-	OV_TRACING_PARAMS = ""
+  OV_TRACING_PARAMS = ""
 endif
 
-BAZEL_DEBUG_FLAGS="--strip=$(STRIP)"$(BAZEL_DEBUG_BUILD_FLAGS)$(DISABLE_MEDIAPIPE_PARAMS)$(DISABLE_PYTHON_PARAMS)$(FUZZER_BUILD_PARAMS)$(OV_TRACING_PARAMS)
-
+ifeq ($(findstring ubuntu,$(BASE_OS)),ubuntu)
+  TARGET_DISTRO_PARAMS = " --//:distro=ubuntu"
+else ifeq ($(findstring redhat,$(BASE_OS)),redhat)
+  TARGET_DISTRO_PARAMS = " --//:distro=redhat"
+else
+  $(error BASE_OS must be either ubuntu or redhat)
+endif
+CAPI_FLAGS = "--strip=$(STRIP)"$(BAZEL_DEBUG_BUILD_FLAGS)"  --config=mp_off_py_off"$(OV_TRACING_PARAMS)$(TARGET_DISTRO_PARAMS)
+BAZEL_DEBUG_FLAGS="--strip=$(STRIP)"$(BAZEL_DEBUG_BUILD_FLAGS)$(DISABLE_PARAMS)$(FUZZER_BUILD_PARAMS)$(OV_TRACING_PARAMS)$(TARGET_DISTRO_PARAMS)$(REPO_ENV)
 
 # Option to Override release image.
 # Release image OS *must have* glibc version >= glibc version on BASE_OS:
@@ -130,41 +149,33 @@ DIST_OS_TAG ?= $(BASE_OS_TAG)
 
 ifeq ($(findstring ubuntu,$(BASE_OS)),ubuntu)
   BASE_OS_TAG=$(BASE_OS_TAG_UBUNTU)
+  DIST_OS=ubuntu
   ifeq ($(BASE_OS),ubuntu22)
 	BASE_OS_TAG=22.04
   endif
-  ifeq ($(BASE_OS),ubuntu20)
-	BASE_OS_TAG=20.04
+  ifeq ($(BASE_OS),ubuntu24)
+	BASE_OS_TAG=24.04
   endif
-  OS=ubuntu
-  ifeq ($(NVIDIA),1)
-	BASE_IMAGE=docker.io/nvidia/cuda:11.8.0-runtime-ubuntu$(BASE_OS_TAG)
-	BASE_IMAGE_RELEASE=$(BASE_IMAGE)
-  else
-	BASE_IMAGE ?= ubuntu:$(BASE_OS_TAG)
-	BASE_IMAGE_RELEASE=$(BASE_IMAGE)
-  endif
-  ifeq ($(BASE_OS_TAG),20.04)
-	INSTALL_DRIVER_VERSION ?= "22.43.24595"
-	DLDT_PACKAGE_URL ?= https://storage.openvinotoolkit.org/repositories/openvino/packages/2023.3/linux/l_openvino_toolkit_ubuntu20_2023.3.0.13775.ceeafaf64f3_x86_64.tgz
+  BASE_IMAGE ?= ubuntu:$(BASE_OS_TAG)
+  BASE_IMAGE_RELEASE=$(BASE_IMAGE)
+  ifeq ($(BASE_OS_TAG),24.04)
+        OS=ubuntu24
+	INSTALL_DRIVER_VERSION ?= "25.31.34666"
+	DLDT_PACKAGE_URL ?= https://storage.openvinotoolkit.org/repositories/openvino/packages/pre-release/2025.3.0rc2/openvino_toolkit_ubuntu24_2025.3.0.dev20250826_x86_64.tgz
   else ifeq  ($(BASE_OS_TAG),22.04)
-	INSTALL_DRIVER_VERSION ?= "23.22.26516"
-	DLDT_PACKAGE_URL ?= https://storage.openvinotoolkit.org/repositories/openvino/packages/2023.3/linux/l_openvino_toolkit_ubuntu22_2023.3.0.13775.ceeafaf64f3_x86_64.tgz
+        OS=ubuntu22
+	INSTALL_DRIVER_VERSION ?= "24.39.31294"
+	DLDT_PACKAGE_URL ?= https://storage.openvinotoolkit.org/repositories/openvino/packages/pre-release/2025.3.0rc2/openvino_toolkit_ubuntu22_2025.3.0.dev20250826_x86_64.tgz
   endif
 endif
 ifeq ($(BASE_OS),redhat)
   BASE_OS_TAG=$(BASE_OS_TAG_REDHAT)
   OS=redhat
-  ifeq ($(NVIDIA),1)
-    BASE_IMAGE=docker.io/nvidia/cuda:11.8.0-runtime-ubi8
-	BASE_IMAGE_RELEASE=$(BASE_IMAGE)
-  else
-    BASE_IMAGE ?= registry.access.redhat.com/ubi8/ubi:$(BASE_OS_TAG_REDHAT)
-	BASE_IMAGE_RELEASE=registry.access.redhat.com/ubi8/ubi-minimal:$(BASE_OS_TAG_REDHAT)
-  endif	
+  BASE_IMAGE ?= registry.access.redhat.com/ubi9/ubi:$(BASE_OS_TAG_REDHAT)
+  BASE_IMAGE_RELEASE=registry.access.redhat.com/ubi9/ubi-minimal:$(BASE_OS_TAG_REDHAT)
   DIST_OS=redhat
-  INSTALL_DRIVER_VERSION ?= "23.22.26516"
-  DLDT_PACKAGE_URL ?= https://storage.openvinotoolkit.org/repositories/openvino/packages/2023.3/linux/l_openvino_toolkit_rhel8_2023.3.0.13775.ceeafaf64f3_x86_64.tgz
+  DLDT_PACKAGE_URL ?= https://storage.openvinotoolkit.org/repositories/openvino/packages/pre-release/2025.3.0rc2/openvino_toolkit_rhel8_2025.3.0.dev20250826_x86_64.tgz
+  INSTALL_DRIVER_VERSION ?= "24.52.32224"
 endif
 
 OVMS_CPP_DOCKER_IMAGE ?= openvino/model_server
@@ -173,18 +184,13 @@ ifeq ($(BAZEL_BUILD_TYPE),dbg)
 endif
 
 OVMS_CPP_IMAGE_TAG ?= latest
-ifeq ($(NVIDIA),1)
-  IMAGE_TAG_SUFFIX = -cuda
-endif
 
 OVMS_PYTHON_IMAGE_TAG ?= py
 
-PRODUCT_NAME = "OpenVINO Model Server"
-PRODUCT_VERSION ?= "2023.3.0"
+PRODUCT_VERSION ?= "2025.3.0"
 PROJECT_VER_PATCH =
 
 $(eval PROJECT_VER_PATCH:=`git rev-parse --short HEAD`)
-$(eval PROJECT_NAME:=${PRODUCT_NAME})
 $(eval PROJECT_VERSION:=${PRODUCT_VERSION}.${PROJECT_VER_PATCH})
 
 OVMS_CPP_CONTAINER_NAME ?= "server-test-${PROJECT_VER_PATCH}-$(shell date +%Y-%m-%d-%H.%M.%S)"
@@ -198,6 +204,8 @@ TEST_PATH ?= tests/functional/
 
 BUILD_CUSTOM_NODES ?= false
 
+VERBOSE_LOGS ?= OFF
+
 BUILD_ARGS = --build-arg http_proxy=$(HTTP_PROXY)\
 	--build-arg https_proxy=$(HTTPS_PROXY)\
 	--build-arg no_proxy=$(NO_PROXY)\
@@ -205,24 +213,26 @@ BUILD_ARGS = --build-arg http_proxy=$(HTTP_PROXY)\
 	--build-arg ov_source_org=$(OV_SOURCE_ORG)\
 	--build-arg ov_contrib_org=$(OV_CONTRIB_ORG)\
 	--build-arg ov_use_binary=$(OV_USE_BINARY)\
-	--build-arg sentencepiece=$(SENTENCEPIECE)\
 	--build-arg DLDT_PACKAGE_URL=$(DLDT_PACKAGE_URL)\
 	--build-arg CHECK_COVERAGE=$(CHECK_COVERAGE)\
 	--build-arg RUN_TESTS=$(RUN_TESTS)\
+	--build-arg OPTIMIZE_BUILDING_TESTS=$(OPTIMIZE_BUILDING_TESTS)\
+	--build-arg RUN_GPU_TESTS=$(RUN_GPU_TESTS)\
 	--build-arg FUZZER_BUILD=$(FUZZER_BUILD)\
 	--build-arg debug_bazel_flags=$(BAZEL_DEBUG_FLAGS)\
 	--build-arg minitrace_flags=$(MINITRACE_FLAGS) \
 	--build-arg CMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE)\
 	--build-arg PROJECT_VERSION=$(PROJECT_VERSION)\
 	--build-arg BASE_IMAGE=$(BASE_IMAGE)\
-	--build-arg NVIDIA=$(NVIDIA)\
+	--build-arg BASE_OS=$(BASE_OS)\
 	--build-arg ov_contrib_branch=$(OV_CONTRIB_BRANCH)\
+	--build-arg ov_tokenizers_branch=$(OV_TOKENIZERS_BRANCH)\
 	--build-arg INSTALL_RPMS_FROM_URL=$(INSTALL_RPMS_FROM_URL)\
 	--build-arg INSTALL_DRIVER_VERSION=$(INSTALL_DRIVER_VERSION)\
-	--build-arg GPU=$(GPU)\
 	--build-arg RELEASE_BASE_IMAGE=$(BASE_IMAGE_RELEASE)\
 	--build-arg JOBS=$(JOBS)\
-	--build-arg CAPI_FLAGS=$(CAPI_FLAGS)
+	--build-arg CAPI_FLAGS=$(CAPI_FLAGS)\
+	--build-arg VERBOSE_LOGS=$(VERBOSE_LOGS)
 
 
 .PHONY: default docker_build \
@@ -234,19 +244,37 @@ venv:$(ACTIVATE)
 	@echo -n "Using venv "
 	@. $(ACTIVATE); python3 --version
 
+venv-style:$(ACTIVATE_STYLE)
+	@echo $(BUILD_ARGS)
+	@echo -n "Using venv "
+	@python3 --version
+spell: venv-style
+	@{ git ls-files; git diff --name-only --cached; } | sort | uniq | xargs $(VIRTUALENV_STYLE_DIR)/bin/codespell --skip "spelling-whitelist.txt" 2>&1 | grep -vFf spelling-whitelist.txt; if [ $$? != 1 ]; then exit 1; fi
+	@echo "Spelling check completed."
+
 $(ACTIVATE):
 	@echo "Updating virtualenv dependencies in: $(VIRTUALENV_DIR)..."
+	@python3 -m pip install virtualenv
 	@test -d $(VIRTUALENV_DIR) || $(VIRTUALENV_EXE) $(VIRTUALENV_DIR)
 	@. $(ACTIVATE); pip3 install --upgrade pip
-	@. $(ACTIVATE); pip3 install -vUqq setuptools
+	@. $(ACTIVATE); pip3 install -vUqq "setuptools<80"
 	@. $(ACTIVATE); pip3 install -qq -r tests/requirements.txt
 	@touch $(ACTIVATE)
 
-cppclean: venv
-	@echo "Checking cppclean..."
-	@. $(ACTIVATE); bash -c "./ci/cppclean.sh"
+$(ACTIVATE_STYLE):
+	@echo "Updating virtualenv dependencies in: $(VIRTUALENV_STYLE_DIR)..."
+	@python3 -m pip install virtualenv
+	@test -d $(VIRTUALENV_STYLE_DIR) || $(VIRTUALENV_EXE) $(VIRTUALENV_STYLE_DIR)
+	@. $(ACTIVATE_STYLE); pip3 install --upgrade pip
+	@. $(ACTIVATE_STYLE); pip3 install -vUqq "setuptools<80"
+	@. $(ACTIVATE_STYLE); pip3 install -qq -r ci/style_requirements.txt
+	@touch $(ACTIVATE_STYLE)
 
-style: venv clang-format-check cpplint cppclean
+cppclean: venv-style
+	@echo "Checking cppclean..."
+	@bash -c "./ci/cppclean.sh"
+
+style: venv-style spell clang-format-check cpplint cppclean
 
 hadolint:
 	@echo "Checking SDL requirements..."
@@ -255,11 +283,11 @@ hadolint:
 
 bandit:
 	@echo "Checking python files..."
-	@. $(ACTIVATE); bash -c "./ci/bandit.sh"
+	@. $(ACTIVATE_STYLE); bash -c "./ci/bandit.sh"
 
 license-headers:
 	@echo "Checking license headers in files..."
-	@. $(ACTIVATE); bash -c "python3 ./ci/lib_search.py . > missing_headers.txt"
+	@. $(ACTIVATE_STYLE); bash -c "python3 ./ci/lib_search.py . > missing_headers.txt"
 	@if ! grep -FRq "All files have headers" missing_headers.txt; then\
         echo "Files with missing headers";\
         cat missing_headers.txt;\
@@ -267,27 +295,27 @@ license-headers:
 	fi
 	@rm missing_headers.txt
 
-sdl-check: venv hadolint bandit license-headers
+sdl-check: venv-style hadolint bandit license-headers
 
 	@echo "Checking forbidden functions in files..."
-	@. $(ACTIVATE); bash -c "python3 ./ci/lib_search.py . functions > forbidden_functions.txt"
+	@. $(ACTIVATE_STYLE); bash -c "python3 ./ci/lib_search.py . functions > forbidden_functions.txt"
 	@if ! grep -FRq "All files checked for forbidden functions" forbidden_functions.txt; then\
 		error Run python3 ./ci/lib_search.py . functions - to see forbidden functions file list.;\
 	fi
 	@rm forbidden_functions.txt
 
-cpplint: venv
+cpplint: venv-style
 	@echo "Style-checking codebase..."
-	@. $(ACTIVATE); echo ${PWD}; cpplint ${STYLE_CHECK_OPTS} ${STYLE_CHECK_DIRS}
+	@. $(ACTIVATE_STYLE); echo ${PWD}; cpplint ${STYLE_CHECK_OPTS} ${STYLE_CHECK_DIRS}
 
-clang-format: venv
+clang-format: venv-style
 	@echo "Formatting files with clang-format.."
-	@. $(ACTIVATE); find ${STYLE_CHECK_DIRS} -regex '.*\.\(cpp\|hpp\|cc\|cxx\)' -exec clang-format -style=file -i {} \;
+	@. $(ACTIVATE_STYLE); find ${STYLE_CHECK_DIRS} -regex '.*\.\(cpp\|hpp\|cc\|cxx\)' -exec clang-format -style=file -i {} \;
 
 clang-format-check: clang-format
 	@echo "Checking if clang-format changes were committed ..."
-	@git diff --exit-code || (echo "clang-format changes not commited. Commit those changes first"; exit 1)
-	@git diff --exit-code --staged || (echo "clang-format changes not commited. Commit those changes first"; exit 1)
+	@git diff --exit-code || (echo "clang-format changes not committed. Commit those changes first"; exit 1)
+	@git diff --exit-code --staged || (echo "clang-format changes not committed. Commit those changes first"; exit 1)
 
 .PHONY: docker_build
 docker_build: ovms_builder_image targz_package ovms_release_images
@@ -313,24 +341,12 @@ ifeq ($(FUZZER_BUILD),1)
 	@echo "Cannot run fuzzer with redhat"; exit 1 ;
   endif
 endif
-ifeq ($(NVIDIA),1)
-  ifeq ($(OV_USE_BINARY),1)
-	@echo "Building NVIDIA plugin requires OV built from source. To build NVIDIA plugin and OV from source make command should look like this 'NVIDIA=1 OV_USE_BINARY=0 make docker_build'"; exit 1 ;
-  endif
-endif
-ifeq ($(BASE_OS),redhat)
-	@mkdir -p entitlement
-	@mkdir -p rhsm-ca
-endif
 ifeq ($(NO_DOCKER_CACHE),true)
 	$(eval NO_CACHE_OPTION:=--no-cache)
 	@echo "Docker image will be rebuilt from scratch"
 	@docker pull $(BASE_IMAGE)
   ifeq ($(BASE_OS),redhat)
-	@docker pull registry.access.redhat.com/ubi8/ubi-minimal:$(BASE_OS_TAG_REDHAT)
-    ifeq ($(NVIDIA),1)
-	@docker pull docker.io/nvidia/cuda:11.8.0-runtime-ubi8
-    endif
+	@docker pull registry.access.redhat.com/ubi9/ubi-minimal:$(BASE_OS_TAG_REDHAT)
   endif
 endif
 ifeq ($(USE_BUILDX),true)
@@ -340,7 +356,6 @@ endif
 ifeq ($(BUILD_CUSTOM_NODES),true)
 	@echo "Building custom nodes"
 	@cd src/custom_nodes && make USE_BUILDX=$(USE_BUILDX) NO_DOCKER_CACHE=$(NO_DOCKER_CACHE) BASE_OS=$(OS) BASE_IMAGE=$(BASE_IMAGE) 
-	@cd src/custom_nodes/tokenizer && make USE_BUILDX=$(USE_BUILDX) NO_DOCKER_CACHE=$(NO_DOCKER_CACHE) BASE_OS=$(OS) BASE_IMAGE=$(BASE_IMAGE) 
 endif
 	@echo "Building docker image $(BASE_OS)"
 	# Provide metadata information into image if defined
@@ -351,15 +366,15 @@ else
 	@touch .workspace/metadata.json
 endif
 	@cat .workspace/metadata.json
-	docker $(BUILDX) build $(NO_CACHE_OPTION) -f Dockerfile.$(OS) . \
+	docker $(BUILDX) build $(NO_CACHE_OPTION) -f Dockerfile.$(DIST_OS) . \
 		$(BUILD_ARGS) \
 		-t $(OVMS_CPP_DOCKER_IMAGE)-build:$(OVMS_CPP_IMAGE_TAG)$(IMAGE_TAG_SUFFIX) \
 		--target=build
 
 targz_package:
-	docker $(BUILDX) build -f Dockerfile.$(OS) . \
+	docker $(BUILDX) build -f Dockerfile.$(DIST_OS) . \
 		$(BUILD_ARGS) \
-		--build-arg BUILD_IMAGE=$(OVMS_CPP_DOCKER_IMAGE)-build:$(OVMS_CPP_IMAGE_TAG)$(IMAGE_TAG_SUFFIX) \
+		--build-arg BUILD_IMAGE=$(BUILD_IMAGE) \
 		-t $(OVMS_CPP_DOCKER_IMAGE)-pkg:$(OVMS_CPP_IMAGE_TAG) \
 		--target=pkg && \
 	rm -vrf dist/$(OS) && mkdir -p dist/$(OS) && \
@@ -367,26 +382,31 @@ targz_package:
 	docker cp $$ID:/ovms_pkg/$(OS) dist/ && \
 	docker rm $$ID
 	cd dist/$(OS) && sha256sum --check ovms.tar.gz.sha256
-	cd dist/$(OS) && sha256sum --check ovms.tar.xz.sha256
 
 ovms_release_images:
 ifeq ($(USE_BUILDX),true)
 	$(eval BUILDX:=buildx)
 	$(eval NO_CACHE_OPTION:=--no-cache-filter release)
 endif
-	docker $(BUILDX) build $(NO_CACHE_OPTION) -f Dockerfile.$(OS) . \
+ifeq ($(BASE_OS),redhat)
+	$(eval NPU:=0)
+else
+	$(eval NPU:=1)
+endif
+	docker $(BUILDX) build $(NO_CACHE_OPTION) -f Dockerfile.$(DIST_OS) . \
 		$(BUILD_ARGS) \
 		-t $(OVMS_CPP_DOCKER_IMAGE):$(OVMS_CPP_IMAGE_TAG)$(IMAGE_TAG_SUFFIX) \
 		--target=release && \
-	docker $(BUILDX) build $(NO_CACHE_OPTION) -f Dockerfile.$(OS) . \
+	docker $(BUILDX) build $(NO_CACHE_OPTION) -f Dockerfile.$(DIST_OS) . \
 		$(BUILD_ARGS) \
 		--build-arg GPU=1 \
+		--build-arg NPU=$(NPU) \
 		-t $(OVMS_CPP_DOCKER_IMAGE)-gpu:$(OVMS_CPP_IMAGE_TAG)$(IMAGE_TAG_SUFFIX) \
 		--target=release && \
 	docker tag $(OVMS_CPP_DOCKER_IMAGE)-gpu:$(OVMS_CPP_IMAGE_TAG)$(IMAGE_TAG_SUFFIX) $(OVMS_CPP_DOCKER_IMAGE):$(OVMS_CPP_IMAGE_TAG)-gpu$(IMAGE_TAG_SUFFIX)
 ifeq ($(BUILD_NGINX), 1)
 	cd extras/nginx-mtls-auth && \
-	http_proxy=$(HTTP_PROXY) https_proxy=$(HTTPS_PROXY) no_proxy=$(NO_PROXY) ./build.sh "$(OVMS_CPP_DOCKER_IMAGE):$(OVMS_CPP_IMAGE_TAG)$(IMAGE_TAG_SUFFIX)" "$(OVMS_CPP_DOCKER_IMAGE)-nginx-mtls:$(OVMS_CPP_IMAGE_TAG)$(IMAGE_TAG_SUFFIX)" "$(OS)" && \
+	http_proxy=$(HTTP_PROXY) https_proxy=$(HTTPS_PROXY) no_proxy=$(NO_PROXY) ./build.sh "$(OVMS_CPP_DOCKER_IMAGE):$(OVMS_CPP_IMAGE_TAG)$(IMAGE_TAG_SUFFIX)" "$(OVMS_CPP_DOCKER_IMAGE)-nginx-mtls:$(OVMS_CPP_IMAGE_TAG)$(IMAGE_TAG_SUFFIX)" "$(DIST_OS)" && \
 	docker tag $(OVMS_CPP_DOCKER_IMAGE)-nginx-mtls:$(OVMS_CPP_IMAGE_TAG)$(IMAGE_TAG_SUFFIX) $(OVMS_CPP_DOCKER_IMAGE):$(OVMS_CPP_IMAGE_TAG)-nginx-mtls$(IMAGE_TAG_SUFFIX)
 endif
 
@@ -394,12 +414,12 @@ get_gpl_mpl_packages:
 ifeq ($(findstring ubuntu,$(BASE_OS)),ubuntu)
 	@docker run -u 0 --entrypoint bash $(OVMS_CPP_DOCKER_IMAGE):$(OVMS_CPP_IMAGE_TAG)$(IMAGE_TAG_SUFFIX) -c 'dpkg --get-selections | sed "s/\t//g" | sed "s/install//g" | cut -d":" -f1 | tr -d "\r"' > ubuntu.txt
 	@-docker run -u 0 --entrypoint bash -v ${PWD}:/ovms $(OVMS_CPP_DOCKER_IMAGE):$(OVMS_CPP_IMAGE_TAG)$(IMAGE_TAG_SUFFIX) -c 'cd /ovms ; cat ubuntu.txt | tr -d "\r" | xargs -I % bash -c "grep -l -e GPL -e MPL /usr/share/doc/%/copyright" 2> /dev/null' > sources.txt
-	@docker run -u 0 --entrypoint bash -v ${PWD}:/ovms $(OVMS_CPP_DOCKER_IMAGE):$(OVMS_CPP_IMAGE_TAG)$(IMAGE_TAG_SUFFIX) -c 'sed -Ei "s/# deb-src /deb-src /" /etc/apt/sources.list ; apt update ; cd /ovms ; d="ovms_ubuntu_$(OVMS_CPP_IMAGE_TAG)" ;mkdir "$$d" ; cd "$$d" ; for I in `cat /ovms/sources.txt | cut -d"/" -f5`; do apt-get source -q --download-only $$I; done'
+	@docker run -u 0 --entrypoint bash -v ${PWD}:/ovms $(OVMS_CPP_DOCKER_IMAGE):$(OVMS_CPP_IMAGE_TAG)$(IMAGE_TAG_SUFFIX) -c 'sed -Ei "s/^Types: deb$$/Types: deb deb-src/" /etc/apt/sources.list.d/ubuntu.sources ; apt update ; cd /ovms ; d="ovms_ubuntu_$(OVMS_CPP_IMAGE_TAG)" ;mkdir "$$d" ; cd "$$d" ; for I in `cat /ovms/sources.txt | cut -d"/" -f5`; do apt-get source -q --download-only $$I; done'
 	@rm ubuntu.txt sources.txt
 endif
 ifeq ($(BASE_OS),redhat)
 	touch base_packages.txt
-	docker run registry.access.redhat.com/ubi8-minimal:8.8 rpm -qa  --qf "%{NAME}\n" | sort > base_packages.txt
+	docker run registry.access.redhat.com/ubi9-minimal:9.6 rpm -qa  --qf "%{NAME}\n" | sort > base_packages.txt
 	docker run --entrypoint rpm $(OVMS_CPP_DOCKER_IMAGE):$(OVMS_CPP_IMAGE_TAG)$(IMAGE_TAG_SUFFIX) -qa  --qf "%{NAME}\n" | sort > all_packages.txt
 	rm -rf ovms_rhel_$(OVMS_CPP_IMAGE_TAG)
 	mkdir ovms_rhel_$(OVMS_CPP_IMAGE_TAG)
@@ -419,18 +439,21 @@ ifeq ($(USE_BUILDX),true)
 	$(eval BUILDX:=buildx)
 	$(eval NO_CACHE_OPTION:=--no-cache-filter release)
 endif
-	docker $(BUILDX) build $(NO_CACHE_OPTION) -f Dockerfile.$(OS) . \
+	docker $(BUILDX) build $(NO_CACHE_OPTION) -f Dockerfile.$(DIST_OS) . \
 		$(BUILD_ARGS) \
-		-t $(OVMS_CPP_DOCKER_IMAGE):$(OVMS_CPP_IMAGE_TAG)
+		--build-arg BUILD_IMAGE=$(BUILD_IMAGE) \
+		--build-arg GPU=$(GPU) \
+		--build-arg NPU=$(NPU) \
+		-t $(OVMS_CPP_DOCKER_IMAGE):$(OVMS_CPP_IMAGE_TAG) \
 		--target=release
 ifeq ($(BUILD_NGINX), 1)
 	cd extras/nginx-mtls-auth && \
-	http_proxy=$(HTTP_PROXY) https_proxy=$(HTTPS_PROXY) no_proxy=$(NO_PROXY) ./build.sh "$(OVMS_CPP_DOCKER_IMAGE):$(OVMS_CPP_IMAGE_TAG)" "$(OVMS_CPP_DOCKER_IMAGE)-nginx-mtls:$(OVMS_CPP_IMAGE_TAG)" "$(OS)" && \
+	http_proxy=$(HTTP_PROXY) https_proxy=$(HTTPS_PROXY) no_proxy=$(NO_PROXY) ./build.sh "$(OVMS_CPP_DOCKER_IMAGE):$(OVMS_CPP_IMAGE_TAG)" "$(OVMS_CPP_DOCKER_IMAGE)-nginx-mtls:$(OVMS_CPP_IMAGE_TAG)" "$(DIST_OS)" && \
 	docker tag $(OVMS_CPP_DOCKER_IMAGE)-nginx-mtls:$(OVMS_CPP_IMAGE_TAG) $(OVMS_CPP_DOCKER_IMAGE):$(OVMS_CPP_IMAGE_TAG)-nginx-mtls
 endif
 
-python_image: release_image
-	@docker build --build-arg http_proxy="$(http_proxy)" --build-arg https_proxy="$(https_proxy)" --build-arg IMAGE_NAME=$(OVMS_CPP_DOCKER_IMAGE):$(OVMS_CPP_IMAGE_TAG) demos/python_demos -t $(OVMS_CPP_DOCKER_IMAGE):$(OVMS_PYTHON_IMAGE_TAG)
+python_image:
+	@docker build --build-arg http_proxy="$(http_proxy)" --build-arg https_proxy="$(https_proxy)" --build-arg IMAGE_NAME=$(OVMS_CPP_DOCKER_IMAGE):$(OVMS_CPP_IMAGE_TAG) -f demos/python_demos/Dockerfile.$(DIST_OS) demos/python_demos/ -t $(OVMS_CPP_DOCKER_IMAGE):$(OVMS_PYTHON_IMAGE_TAG)
 
 
 # Ci build expects index.html in genhtml directory
@@ -590,9 +613,9 @@ test_python_clients:
 	@echo "Download models"
 	@if [ ! -d "tests/python/models" ]; then cd tests/python && \
 		mkdir models && \
-		docker run -u $(id -u):$(id -g) -v ${PWD}/tests/python/models:/models openvino/ubuntu20_dev:latest omz_downloader --name resnet-50-tf --output_dir /models && \
-		docker run -u $(id -u):$(id -g) -v ${PWD}/tests/python/models:/models:rw openvino/ubuntu20_dev:latest omz_converter --name resnet-50-tf --download_dir /models --output_dir /models --precisions FP32 && \
-		docker run -u $(id -u):$(id -g) -v ${PWD}/tests/python/models:/models:rw openvino/ubuntu20_dev:latest mv /models/public/resnet-50-tf/FP32 /models/public/resnet-50-tf/1; fi
+		docker run -u $(id -u):$(id -g) -v ${PWD}/tests/python/models:/models openvino/ubuntu20_dev:2024.6.0 omz_downloader --name resnet-50-tf --output_dir /models && \
+		docker run -u $(id -u):$(id -g) -v ${PWD}/tests/python/models:/models:rw openvino/ubuntu20_dev:2024.6.0 omz_converter --name resnet-50-tf --download_dir /models --output_dir /models --precisions FP32 && \
+		docker run -u $(id -u):$(id -g) -v ${PWD}/tests/python/models:/models:rw openvino/ubuntu20_dev:2024.6.0 mv /models/public/resnet-50-tf/FP32 /models/public/resnet-50-tf/1; fi
 	@echo "Start test container"
 	@docker run -d --rm --name $(PYTHON_CLIENT_TEST_CONTAINER_NAME) -v ${PWD}/tests/python/models/public/resnet-50-tf:/models/public/resnet-50-tf -p $(PYTHON_CLIENT_TEST_REST_PORT):8000 -p $(PYTHON_CLIENT_TEST_GRPC_PORT):9000 openvino/model_server:latest --model_name resnet --model_path /models/public/resnet-50-tf --port 9000 --rest_port 8000 && \
 		sleep 10
@@ -614,7 +637,7 @@ tools_get_deps:
 
 cpu_extension:
 	cd src/example/SampleCpuExtension && \
-	docker build -f Dockerfile.$(OS) -t sample_cpu_extension:latest \
+	docker build -f Dockerfile.$(DIST_OS) -t sample_cpu_extension:latest \
 		--build-arg http_proxy=${http_proxy} \
 		--build-arg https_proxy=${https_proxy} \
 		--build-arg no_proxy=${no_proxy} \
@@ -623,3 +646,54 @@ cpu_extension:
 		--build-arg BASE_IMAGE=${BASE_IMAGE} .
 	mkdir -p ./lib/${OS}
 	docker cp $$(docker create --rm sample_cpu_extension:latest):/workspace/libcustom_relu_cpu_extension.so ./lib/${OS}
+
+prepare_models:
+	./prepare_llm_models.sh ${TEST_LLM_PATH}
+ifeq ($(RUN_GPU_TESTS),1)
+	./prepare_gpu_models.sh ${GPU_MODEL_PATH}
+endif
+
+run_unit_tests: prepare_models
+	docker rm -f $(OVMS_CPP_IMAGE_TAG)$(IMAGE_TAG_SUFFIX)
+ifeq ($(RUN_GPU_TESTS),1)
+	docker run \
+		--name $(OVMS_CPP_IMAGE_TAG)$(IMAGE_TAG_SUFFIX) \
+		--device=/dev/dri \
+		--group-add=$(shell stat -c "%g" /dev/dri/render* | head -n 1) \
+		-u 0 \
+		-v $(shell realpath ./run_unit_tests.sh):/ovms/./run_unit_tests.sh \
+		-v $(shell realpath ${GPU_MODEL_PATH}):/ovms/src/test/face_detection_adas/1:ro \
+		-v $(shell realpath ${TEST_LLM_PATH}):/ovms/src/test/llm_testing:ro \
+		-e https_proxy=${https_proxy} \
+		-e RUN_TESTS=1 \
+		-e RUN_GPU_TESTS=$(RUN_GPU_TESTS) \
+		-e JOBS=$(JOBS) \
+		-e debug_bazel_flags=${BAZEL_DEBUG_FLAGS} \
+		$(OVMS_CPP_DOCKER_IMAGE)-build:$(OVMS_CPP_IMAGE_TAG)$(IMAGE_TAG_SUFFIX) \
+		./run_unit_tests.sh ;\
+		exit_code=$$? ;\
+		docker container cp $(OVMS_CPP_IMAGE_TAG)$(IMAGE_TAG_SUFFIX):/ovms/test_logs.tar.gz . ;\
+		docker container cp $(OVMS_CPP_IMAGE_TAG)$(IMAGE_TAG_SUFFIX):/ovms/linux_tests_summary.log . ;\
+		docker rm -f $(OVMS_CPP_IMAGE_TAG)$(IMAGE_TAG_SUFFIX) ;\
+		exit $$exit_code
+else
+	docker run \
+		--name $(OVMS_CPP_IMAGE_TAG)$(IMAGE_TAG_SUFFIX) \
+		-v $(shell realpath ./run_unit_tests.sh):/ovms/./run_unit_tests.sh \
+		-v $(shell realpath ${TEST_LLM_PATH}):/ovms/src/test/llm_testing:ro \
+		-e https_proxy=${https_proxy} \
+		-e RUN_TESTS=1 \
+		-e JOBS=$(JOBS) \
+		-e debug_bazel_flags=${BAZEL_DEBUG_FLAGS} \
+		$(OVMS_CPP_DOCKER_IMAGE)-build:$(OVMS_CPP_IMAGE_TAG)$(IMAGE_TAG_SUFFIX) \
+		./run_unit_tests.sh ;\
+		exit_code=$$? ; \
+		docker container cp $(OVMS_CPP_IMAGE_TAG)$(IMAGE_TAG_SUFFIX):/ovms/test_logs.tar.gz . ;\
+		docker container cp $(OVMS_CPP_IMAGE_TAG)$(IMAGE_TAG_SUFFIX):/ovms/linux_tests_summary.log . ;\
+		docker rm -f $(OVMS_CPP_IMAGE_TAG)$(IMAGE_TAG_SUFFIX) ;\
+		exit $$exit_code
+endif
+
+
+run_lib_files_test:
+	docker run --entrypoint bash -v $(realpath tests/file_lists):/test $(OVMS_CPP_DOCKER_IMAGE):$(OVMS_CPP_IMAGE_TAG)$(IMAGE_TAG_SUFFIX) ./test/test_release_files.sh ${BAZEL_DEBUG_FLAGS} > file_test.log 2>&1 ; exit_status=$$? ; tail -200 file_test.log ; exit $$exit_status

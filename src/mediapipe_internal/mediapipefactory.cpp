@@ -25,17 +25,22 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
-
+#pragma warning(push)
+#pragma warning(disable : 6001 4324 6385 6326 6308 6387 6246)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wall"
 #include "tensorflow_serving/apis/prediction_service.grpc.pb.h"
 #pragma GCC diagnostic pop
+#pragma warning(pop)
 #include "../kfs_frontend/kfs_grpc_inference_service.hpp"
 #include "../logging.hpp"
 #include "../modelmanager.hpp"
 #include "../status.hpp"
 #include "../stringutils.hpp"
+#pragma warning(push)
+#pragma warning(disable : 6001 4324 6385 6386 6326 6246)
 #include "mediapipe/framework/deps/registration.h"
+#pragma warning(pop)
 #include "mediapipegraphdefinition.hpp"
 
 namespace ovms {
@@ -101,8 +106,6 @@ Status MediapipeFactory::reloadDefinition(const std::string& name,
 
 Status MediapipeFactory::create(std::shared_ptr<MediapipeGraphExecutor>& pipeline,
     const std::string& name,
-    const KFSRequest* request,
-    KFSResponse* response,
     ModelManager& manager) const {
     std::shared_lock lock(definitionsMtx);
     if (!definitionExists(name)) {
@@ -110,8 +113,7 @@ Status MediapipeFactory::create(std::shared_ptr<MediapipeGraphExecutor>& pipelin
         return StatusCode::MEDIAPIPE_DEFINITION_NAME_MISSING;
     }
     auto& definition = *definitions.at(name);
-    auto status = definition.create(pipeline, request, response);
-    return status;
+    return definition.create(pipeline);
 }
 
 void MediapipeFactory::retireOtherThan(std::set<std::string>&& graphsInConfigFile, ModelManager& manager) {

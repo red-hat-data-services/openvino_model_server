@@ -27,7 +27,10 @@
 #include <vector>
 
 #include <openvino/openvino.hpp>
+#pragma warning(push)
+#pragma warning(disable : 6313)
 #include <rapidjson/document.h>
+#pragma warning(pop)
 #include <spdlog/spdlog.h>
 #include <sys/stat.h>
 
@@ -46,7 +49,8 @@ const uint32_t DEFAULT_WAIT_FOR_MODEL_LOADED_TIMEOUT_MS = 10000;
 extern const std::string DEFAULT_MODEL_CACHE_DIRECTORY;
 
 class Config;
-class CNLIMWrapper;
+struct CNLIMWrapper;
+struct ModelsSettingsImpl;
 class CustomLoaderConfig;
 class CustomNodeLibraryManager;
 class MetricRegistry;
@@ -98,14 +102,20 @@ private:
     Status lastLoadConfigStatus = StatusCode::OK;
 
     Status cleanupModelTmpFiles(ModelConfig& config);
-    Status reloadModelVersions(std::shared_ptr<ovms::Model>& model, std::shared_ptr<FileSystem>& fs, ModelConfig& config, std::shared_ptr<model_versions_t>& versionsToReload, std::shared_ptr<model_versions_t> versionsFailed);
-    Status addModelVersions(std::shared_ptr<ovms::Model>& model, std::shared_ptr<FileSystem>& fs, ModelConfig& config, std::shared_ptr<model_versions_t>& versionsToStart, std::shared_ptr<model_versions_t> versionsFailed);
-    Status loadModels(const rapidjson::Value::MemberIterator& modelsConfigList, std::vector<ModelConfig>& gatedModelConfigs, std::set<std::string>& modelsInConfigFile, std::set<std::string>& modelsWithInvalidConfig, std::unordered_map<std::string, ModelConfig>& newModelConfigs, const std::string& rootDirectoryPath);
+    Status reloadModelVersions(std::shared_ptr<ovms::Model>& model, std::shared_ptr<FileSystem>& fs, ModelConfig& config, std::shared_ptr<model_versions_t>& versionsToReload, std::shared_ptr<model_versions_t>& versionsFailed);
+    Status addModelVersions(std::shared_ptr<ovms::Model>& model, std::shared_ptr<FileSystem>& fs, ModelConfig& config, std::shared_ptr<model_versions_t>& versionsToStart, std::shared_ptr<model_versions_t>& versionsFailed);
+
 #if (MEDIAPIPE_DISABLE == 0)
+    Status loadModels(const rapidjson::Value::MemberIterator& modelsConfigList, std::vector<ModelConfig>& gatedModelConfigs, std::set<std::string>& modelsInConfigFile, std::set<std::string>& modelsWithInvalidConfig, std::unordered_map<std::string, ModelConfig>& newModelConfigs, const std::string& rootDirectoryPath, std::vector<ovms::MediapipeGraphConfig>& mediapipesInConfigFile);
     Status processMediapipeConfig(const MediapipeGraphConfig& config, std::set<std::string>& mediapipesInConfigFile, MediapipeFactory& factory);
     Status loadMediapipeGraphsConfig(std::vector<MediapipeGraphConfig>& mediapipesInConfigFile);
     Status loadModelsConfig(rapidjson::Document& configJson, std::vector<ModelConfig>& gatedModelConfigs, std::vector<ovms::MediapipeGraphConfig>& mediapipesInConfigFile);
+    Status loadMediapipeSubConfigModels(std::vector<ModelConfig>& gatedModelConfigs, std::set<std::string>& modelsInConfigFile,
+        std::set<std::string>& modelsWithInvalidConfig, std::unordered_map<std::string, ModelConfig>& newModelConfigs, std::vector<MediapipeGraphConfig>& mediapipesInConfigFile);
+    static Status validateUserSettingsInSingleModelCliGraphStart(const ModelsSettingsImpl& modelsSettings);
+    bool CheckStartFromGraph(std::string inputPath, MediapipeGraphConfig& mpConfig, bool checkModelMeshPath);
 #else
+    Status loadModels(const rapidjson::Value::MemberIterator& modelsConfigList, std::vector<ModelConfig>& gatedModelConfigs, std::set<std::string>& modelsInConfigFile, std::set<std::string>& modelsWithInvalidConfig, std::unordered_map<std::string, ModelConfig>& newModelConfigs, const std::string& rootDirectoryPath);
     Status loadModelsConfig(rapidjson::Document& configJson, std::vector<ModelConfig>& gatedModelConfigs);
 #endif
     Status tryReloadGatedModelConfigs(std::vector<ModelConfig>& gatedModelConfigs);
@@ -126,7 +136,7 @@ private:
     /**
      * @brief Cleaner thread for sequence and resources cleanup
      */
-    void cleanerRoutine(uint32_t resourcesCleanupIntervalSec, uint32_t sequenceCleanerIntervalMinutes, std::future<void> cleanerExitSignal);
+    void cleanerRoutine(uint32_t resourcesCleanupIntervalMillisec, uint32_t sequenceCleanerIntervalMinutes, std::future<void> cleanerExitSignal);
 
     /**
      * @brief Mutex for blocking concurrent add & remove of resources
@@ -136,8 +146,10 @@ private:
     /**
      * @brief A JSON configuration filename
      */
+protected:
     std::string configFilename;
 
+private:
     /**
      * @brief A thread object used for monitoring changes in config
      */
@@ -190,8 +202,8 @@ protected:
     /**
      * Time interval between each config file check
      */
-    uint watcherIntervalMillisec = 1000;
-    const int WRONG_CONFIG_FILE_RETRY_DELAY_MS = 10;
+    uint32_t watcherIntervalMillisec = 1000;
+    static const int WRONG_CONFIG_FILE_RETRY_DELAY_MS = 10;
 
 private:
     /**
@@ -199,11 +211,13 @@ private:
      */
     uint32_t sequenceCleaupIntervalMinutes = 5;
 
+protected:
     /**
-     * Time interval between two consecutive resources cleanup scans (in seconds)
+     * Time interval between two consecutive resources cleanup scans (in milliseconds)
      */
-    uint32_t resourcesCleanupIntervalSec = 1;
+    uint32_t resourcesCleanupIntervalMillisec = 1000;
 
+private:
     /**
       * @brief last md5sum of configfile
       */
@@ -223,7 +237,7 @@ private:
      *
      */
     std::string rootDirectoryPath;
-
+    bool startedWithConfigFile = false;
     /**
      * @brief Set json config directory path
      *
@@ -256,15 +270,15 @@ public:
     /**
      *  @brief Gets the watcher interval timestep in seconds
      */
-    uint getWatcherIntervalMillisec() {
+    uint32_t getWatcherIntervalMillisec() {
         return watcherIntervalMillisec;
     }
 
     /**
      *  @brief Gets the cleaner resources interval timestep in seconds
      */
-    uint32_t getResourcesCleanupIntervalSec() {
-        return resourcesCleanupIntervalSec;
+    uint32_t getResourcesCleanupIntervalMillisec() {
+        return resourcesCleanupIntervalMillisec;
     }
 
     /**
@@ -286,8 +300,8 @@ public:
      * 
      * @return config filename
      */
-    const std::string& getConfigFilename() {
-        return configFilename;
+    bool isStartedWithConfigFile() {
+        return startedWithConfigFile;
     }
 
     /**
@@ -345,18 +359,7 @@ public:
      *
      * @return pointer to ModelInstance or nullptr if not found 
      */
-    const std::shared_ptr<ModelInstance> findModelInstance(const std::string& name, model_version_t version = 0) const {
-        auto model = findModelByName(name);
-        if (!model) {
-            return nullptr;
-        }
-
-        if (version == 0) {
-            return model->getDefaultModelInstance();
-        } else {
-            return model->getModelInstanceByVersion(version);
-        }
-    }
+    const std::shared_ptr<ModelInstance> findModelInstance(const std::string& name, model_version_t version = 0) const;
 
     template <typename RequestType, typename ResponseType>
     Status createPipeline(std::unique_ptr<Pipeline>& pipeline,
@@ -366,9 +369,7 @@ public:
         return pipelineFactory.create(pipeline, name, request, response, *this);
     }
     Status createPipeline(std::shared_ptr<MediapipeGraphExecutor>& graph,
-        const std::string& name,
-        const KFSRequest* request,
-        KFSResponse* response);
+        const std::string& name);
 
     const bool pipelineDefinitionExists(const std::string& name) const {
         return pipelineFactory.definitionExists(name);
@@ -398,6 +399,7 @@ public:
         return this->metricConfig;
     }
 
+    Status loadMetricsFromCLI(const Config& config);
     Status loadMetricsConfig(rapidjson::Document& configJson);
 
     /**
@@ -463,9 +465,9 @@ public:
      *
      * @param modelVersionsInstances map with currently served versions
      * @param requestedVersions container with requested versions
-     * @param versionsToRetireIn cointainer for versions to retire
-     * @param versionsToReloadIn cointainer for versions to reload
-     * @param versionsToStartIn cointainer for versions to start
+     * @param versionsToRetireIn container for versions to retire
+     * @param versionsToReloadIn container for versions to reload
+     * @param versionsToStartIn container for versions to start
      */
     static void getVersionsToChange(
         const ModelConfig& newModelConfig,
@@ -482,15 +484,13 @@ public:
      */
     Status configFileReloadNeeded(bool& isNeeded);
 
-    Status parseConfig(const std::string& jsonFilename, rapidjson::Document& configJson);
-
     /**
      * @brief Reads models from configuration file
      * 
      * @param jsonFilename configuration file
      * @return Status 
      */
-    Status loadConfig(const std::string& jsonFilename);
+    Status loadConfig();
 
     /**
      * @brief Updates OVMS configuration with cached configuration file. Will check for newly added model versions

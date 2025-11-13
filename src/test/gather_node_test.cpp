@@ -17,6 +17,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <functional>
+#include <optional>
 #include <sstream>
 
 #include <gmock/gmock.h>
@@ -35,6 +36,7 @@
 #include "../dags/pipelinedefinition.hpp"
 #include "../logging.hpp"
 #include "../modelconfig.hpp"
+#include "../modelinstanceunloadguard.hpp"
 #include "../modelinstance.hpp"
 #include "../ov_utils.hpp"
 #include "../prediction_service_utils.hpp"
@@ -49,7 +51,7 @@ using testing::Return;
 class GatherNodeInputHandlerTest : public ::testing::Test {};
 
 TEST_F(GatherNodeInputHandlerTest, ThreePredecessorNodesWithSubsessionSize2) {
-    // simulate all 3 inputs comming from different predecessor nodes
+    // simulate all 3 inputs coming from different predecessor nodes
     // with session demultiplexed to 2 shards
     const uint32_t shardsCount = 2;  // subsessionSize/demultiplyCount
     std::vector<std::string> inputNames{"a", "b"};
@@ -68,7 +70,7 @@ TEST_F(GatherNodeInputHandlerTest, ThreePredecessorNodesWithSubsessionSize2) {
         for (size_t i = 0; i < inputNames.size(); ++i) {
             EXPECT_FALSE(gInputHandler.isReady());
             gInputHandler.setInput(inputNames[i], inputTensors[i], j);
-            // each input comming from different node so we call notify each time
+            // each input coming from different node so we call notify each time
             ASSERT_EQ(gInputHandler.notifyFinishedDependency(), StatusCode::OK);
         }
     }
@@ -150,7 +152,7 @@ TEST_F(GatherNodeInputHandlerTest, SetInputsWithShardsHavingDifferentShapesShoul
         EXPECT_FALSE(gInputHandler.isReady());
         status = gInputHandler.setInput(inputNames, inputTensors[j], j);
         EXPECT_EQ(status, StatusCode::OK) << status.string();
-        // each input comming from different node so we call notify each time
+        // each input coming from different node so we call notify each time
         status = gInputHandler.notifyFinishedDependency();
         if (!status.ok()) {
             EXPECT_EQ(status, StatusCode::PIPELINE_INCONSISTENT_SHARD_DIMENSIONS) << status.string();
@@ -222,7 +224,7 @@ TEST_F(GatherNodeTest, FullFlowGatherInNonExitNode) {
     // that should gather it results but is not exit node
     ConstructorEnabledModelManager manager;
     const std::string fileToReload = directoryPath + "/ovms_config_file.json";
-    createConfigFileWithContent(configDummy1BsDummy2Bs, fileToReload);
+    createConfigFileWithContent(adjustConfigForTargetPlatformCStr(configDummy1BsDummy2Bs), fileToReload);
     auto status = manager.loadConfig(fileToReload);
     ASSERT_EQ(status, StatusCode::OK) << status.string();
     const std::string node1Name = "node1";

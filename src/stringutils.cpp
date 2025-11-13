@@ -18,14 +18,15 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstring>
 #include <iostream>
 #include <limits>
 #include <locale>
+#include <optional>
 #include <sstream>
 #include <utility>
 
-#include "logging.hpp"
 namespace ovms {
 
 std::string joins(const std::vector<std::string>& listOfStrings, const std::string delimiter) {
@@ -107,7 +108,7 @@ std::optional<uint32_t> stou32(const std::string& input) {
     std::string str = input;
     ovms::erase_spaces(str);
 
-    if (str.size() > 0 && str[0] == '-') {
+    if (!str.empty() && str[0] == '-') {
         return std::nullopt;
     }
 
@@ -122,9 +123,42 @@ std::optional<uint32_t> stou32(const std::string& input) {
     }
 }
 
-std::optional<int32_t> stoi32(const std::string& str) {
+std::optional<uint64_t> stou64(const std::string& str) {
+    if (str.empty()) {
+        return std::nullopt;
+    }
+
+    // Reject negative numbers for unsigned conversion
+    if (!str.empty() && str[0] == '-') {
+        return std::nullopt;
+    }
+
+    size_t idx = 0;
     try {
-        return {static_cast<int32_t>(std::stoi(str))};
+        uint64_t val = std::stoull(str, &idx);
+        // Check if the whole string was consumed
+        if (idx != str.size()) {
+            return std::nullopt;
+        }
+        return val;
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+std::optional<int32_t> stoi32(const std::string& str) {
+    if (str.empty()) {
+        return std::nullopt;
+    }
+
+    size_t idx = 0;
+    try {
+        int32_t val = std::stoi(str, &idx);
+        // Check if the whole string was consumed
+        if (idx != str.size()) {
+            return std::nullopt;
+        }
+        return val;
     } catch (...) {
         return std::nullopt;
     }
@@ -153,4 +187,58 @@ std::optional<int64_t> stoi64(const std::string& str) {
         return std::nullopt;
     }
 }
+
+std::optional<float> stof(const std::string& str) {
+    if (str.empty()) {
+        return std::nullopt;
+    }
+
+    size_t idx = 0;
+    try {
+        float val = std::stof(str, &idx);
+        // Check if the whole string was consumed
+        if (idx != str.size()) {
+            return std::nullopt;
+        }
+        // Reject NaN or Inf
+        if (std::isnan(val) || std::isinf(val)) {
+            return std::nullopt;
+        }
+        return val;
+    } catch (...) {
+        return std::nullopt;
+    }
+}
+
+bool isValidUtf8(const std::string& text) {
+    // inspect the chars from the end of the string to test if the utf8 sequence is complete
+    size_t byte_counter = 0;
+    if (text.size() == 0) {
+        return false;
+    }
+    for (size_t i = text.size(); i-- > 0 && byte_counter <= 3;) {
+        int x = static_cast<int>(static_cast<unsigned char>(text[i]));
+        if (((x >> 7) == 0b0) && (byte_counter == 0))
+            return true;  // last char is a single byte char
+        if ((x >> 6) == 0b10)
+            byte_counter++;  // octet belong to multibyte sequence
+        else if (((x >> 5) == 0b110) && (byte_counter + 1 == 2))
+            return true;  // first byte of 2 byte sequence
+        else if (((x >> 4) == 0b1110) && (byte_counter + 1 == 3))
+            return true;  // first byte of 3 byte sequence
+        else if (((x >> 3) == 0b11110) && (byte_counter + 1 == 4))
+            return true;  // first byte of 3 byte sequence
+        else
+            return false;  // invalid utf8 sequence
+    }
+    return false;
+}
+
+std::string toLower(const std::string& input) {
+    std::string result = input;
+    std::transform(result.begin(), result.end(), result.begin(),
+        [](unsigned char c) { return std::tolower(c); });
+    return result;
+}
+
 }  // namespace ovms

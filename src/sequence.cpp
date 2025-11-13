@@ -20,8 +20,6 @@
 #include "ov_utils.hpp"
 #include "status.hpp"
 
-using namespace InferenceEngine;
-
 namespace ovms {
 
 const uint64_t Sequence::getId() const {
@@ -66,5 +64,4 @@ bool Sequence::isTerminated() const {
 void Sequence::setTerminated() {
     this->terminated = true;
 }
-
 }  // namespace ovms

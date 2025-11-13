@@ -24,12 +24,13 @@ class OVInferRequestsQueue;
 class ModelMetricReporter;
 class OVInferRequestsQueue;
 
-struct NodeStreamIdGuard {
+class NodeStreamIdGuard {
+public:
     NodeStreamIdGuard(OVInferRequestsQueue& inferRequestsQueue, ModelMetricReporter& reporter);
     ~NodeStreamIdGuard();
 
-    std::optional<int> tryGetId(const uint microseconds = 1);
-    bool tryDisarm(const uint microseconds = 1);
+    std::optional<int> tryGetId(const uint32_t microseconds = 1);
+    bool tryDisarm(const uint32_t microseconds = 1);
 
 private:
     OVInferRequestsQueue& inferRequestsQueue_;

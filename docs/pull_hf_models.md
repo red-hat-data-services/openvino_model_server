@@ -1,0 +1,63 @@
+# OVMS Pull mode {#ovms_docs_pull}
+
+This document describes how to leverage OpenVINO Model Server (OVMS) pull feature to automate deployment configuration with Generative AI models. When pulling from [Hugging Face Hub](https://huggingface.co/), no additional steps are required. However, when pulling models in Pytorch format, you have to install additional python dependencies when using baremetal execution so that optimum-cli is available for ovms executable or rely on the docker image `openvino/model_server:latest-py`. In summary you have 2 options:
+
+- pulling pre-configured models in IR format (described below)
+- pulling models with automatic conversion and quantization via optimum-cli. Described in the [pulling with conversion](./pull_optimum_cli.md)
+
+> **Note:** Models in IR format must be exported using `optimum-cli` including tokenizer and detokenizer files also in IR format, if applicable. If missing, tokenizer and detokenizer should be added using `convert_tokenizer --with-detokenizer` tool.
+
+## Pulling pre-configured models
+
+There is a special OVMS mode to pull the model from Hugging Face before starting the service. It is triggered by `--source_models` parameter. In addition, `--pull` parameter is for pulling alone. The application quits after the model is downloaded. Without `--pull` option, the model will be deployed and server started.
+
+::::{tab-set}
+:::{tab-item} With Docker
+:sync: docker
+**Required:** Docker Engine installed
+
+```text
+docker run $(id -u):$(id -g) --rm -v <model_repository_path>:/models:rw openvino/model_server:latest --pull --source_model <model_name_in_HF> --model_repository_path /models --model_name <external_model_name> --target_device <DEVICE> --task <task> [TASK_SPECIFIC_PARAMETERS]
+```
+:::
+
+:::{tab-item} On Baremetal Host
+:sync: baremetal
+**Required:** OpenVINO Model Server package - see [deployment instructions](./deploying_server_baremetal.md) for details.
+
+```text
+ovms --pull --source_model <model_name_in_HF> --model_repository_path <model_repository_path> --model_name <external_model_name> --target_device <DEVICE> --task <task> [TASK_SPECIFIC_PARAMETERS]
+```
+:::
+::::
+
+Example for pulling `OpenVINO/Phi-3-mini-FastDraft-50M-int8-ov`:
+
+```text
+ovms --pull --source_model "OpenVINO/Phi-3-mini-FastDraft-50M-int8-ov" --model_repository_path /models --model_name Phi-3-mini-FastDraft-50M-int8-ov --target_device CPU --task text_generation 
+```
+::::{tab-set}
+:::{tab-item} With Docker
+:sync: docker
+**Required:** Docker Engine installed
+
+```text
+docker run $(id -u):$(id -g) --rm -v <model_repository_path>:/models:rw openvino/model_server:latest --pull --source_model "OpenVINO/Phi-3-mini-FastDraft-50M-int8-ov" --model_repository_path /models --model_name Phi-3-mini-FastDraft-50M-int8-ov --task text_generation
+```
+:::
+
+:::{tab-item} On Baremetal Host
+:sync: baremetal
+**Required:** OpenVINO Model Server package - see [deployment instructions](./deploying_server_baremetal.md) for details.
+
+```text
+ovms --pull --source_model "OpenVINO/Phi-3-mini-FastDraft-50M-int8-ov" --model_repository_path /models --model_name Phi-3-mini-FastDraft-50M-int8-ov --task text_generation 
+```
+:::
+::::
+
+> **Note:**  When using pull mode you need read-write access rights to models' repository.
+
+Check [parameters page](./parameters.md) for detailed descriptions of configuration options and parameter usage.
+
+In case you want to setup model and start server in one step, follow [instructions](./starting_server.md).

@@ -106,15 +106,15 @@ Status Pipeline::execute(ExecutionContext context) {
     }
     auto entrySessionKey = meta.getSessionKey();
     startedSessions.emplace(entry.getName() + entrySessionKey);
-    ovms::Status status = entry.execute(entrySessionKey, finishedNodeQueue);  // first node will triger first message
+    ovms::Status status = entry.execute(std::move(entrySessionKey), finishedNodeQueue);  // first node will trigger first message
     if (!status.ok()) {
         SPDLOG_LOGGER_WARN(dag_executor_logger, "Executing pipeline: {} node: {} failed with: {}",
             getName(), entry.getName(), status.string());
         return status;
     }
     DeferredNodeSessions deferredNodeSessions;
-    const uint WAIT_FOR_FINISHED_NODE_TIMEOUT_MICROSECONDS = 5000;
-    const uint WAIT_FOR_DEFERRED_NODE_DISARM_TIMEOUT_MICROSECONDS = 500;
+    const uint32_t WAIT_FOR_FINISHED_NODE_TIMEOUT_MICROSECONDS = 5000;
+    const uint32_t WAIT_FOR_DEFERRED_NODE_DISARM_TIMEOUT_MICROSECONDS = 500;
     // process finished session nodes and if no one is finished check if any node session with deferred execution
     // has necessary resources already
     while (true) {
@@ -158,19 +158,19 @@ Status Pipeline::execute(ExecutionContext context) {
             /*
                 Try to schedule node sessions that are following the currently finished session.
                 Defer next node sessions which are ready, but stream id is not ready yet.
-                Save defered node sessions to temporary container which will be later merged into global container.
+                Save deferred node sessions to temporary container which will be later merged into global container.
             */
             OVMS_PROFILE_SYNC_BEGIN("Try next nodes");
             DeferredNodeSessions tmpDeferredNodeSessions;
             for (auto& nextNode : nextNodesFromFinished) {
                 auto readySessions = nextNode.get().getReadySessions();
-                for (auto& sessionKey : readySessions) {
-                    SPDLOG_LOGGER_DEBUG(dag_executor_logger, "Started execution of pipeline: {} node: {} session: {}", getName(), nextNode.get().getName(), sessionKey);
-                    startedSessions.emplace(nextNode.get().getName() + sessionKey);
-                    status = nextNode.get().execute(sessionKey, finishedNodeQueue);
+                for (auto& readySessionKey : readySessions) {
+                    SPDLOG_LOGGER_DEBUG(dag_executor_logger, "Started execution of pipeline: {} node: {} session: {}", getName(), nextNode.get().getName(), readySessionKey);
+                    startedSessions.emplace(nextNode.get().getName() + readySessionKey);
+                    status = nextNode.get().execute(readySessionKey, finishedNodeQueue);
                     if (status == StatusCode::PIPELINE_STREAM_ID_NOT_READY_YET) {
-                        SPDLOG_LOGGER_DEBUG(dag_executor_logger, "Node: {} session: {} not ready for execution yet", nextNode.get().getName(), sessionKey);
-                        tmpDeferredNodeSessions.emplace_back(nextNode.get(), sessionKey);
+                        SPDLOG_LOGGER_DEBUG(dag_executor_logger, "Node: {} session: {} not ready for execution yet", nextNode.get().getName(), readySessionKey);
+                        tmpDeferredNodeSessions.emplace_back(nextNode.get(), readySessionKey);
                         status = StatusCode::OK;
                     }
                     CHECK_AND_LOG_ERROR(nextNode.get())
@@ -192,18 +192,18 @@ Status Pipeline::execute(ExecutionContext context) {
                 if (finishedNodeQueue.size() > 0) {
                     break;
                 }
-                auto& [nodeRef, sessionKey] = *it;
+                auto& [nodeRef, deferredSessionKey] = *it;
                 auto& node = nodeRef.get();
-                SPDLOG_LOGGER_DEBUG(dag_executor_logger, "Trying to trigger node: {} session: {} execution", node.getName(), sessionKey);
-                status = node.execute(sessionKey, finishedNodeQueue);
+                SPDLOG_LOGGER_DEBUG(dag_executor_logger, "Trying to trigger node: {} session: {} execution", node.getName(), deferredSessionKey);
+                status = node.execute(deferredSessionKey, finishedNodeQueue);
                 if (status.ok()) {
-                    SPDLOG_LOGGER_DEBUG(dag_executor_logger, "Node: {} session: {} is ready", node.getName(), sessionKey);
+                    SPDLOG_LOGGER_DEBUG(dag_executor_logger, "Node: {} session: {} is ready", node.getName(), deferredSessionKey);
                     it = deferredNodeSessions.erase(it);
                     continue;
                 }
                 it++;
                 if (status == StatusCode::PIPELINE_STREAM_ID_NOT_READY_YET) {
-                    SPDLOG_LOGGER_DEBUG(dag_executor_logger, "Node: {} session: {} not ready for execution yet", node.getName(), sessionKey);
+                    SPDLOG_LOGGER_DEBUG(dag_executor_logger, "Node: {} session: {} not ready for execution yet", node.getName(), deferredSessionKey);
                     status = StatusCode::OK;
                 } else {
                     CHECK_AND_LOG_ERROR(node)
@@ -254,7 +254,7 @@ Status Pipeline::execute(ExecutionContext context) {
                 }
             }
             // else scope could be executed always however it seems most reasonable at the time to
-            // free blocked inferRequests from exeuction first rather than free models for reloading
+            // free blocked inferRequests from execution first rather than free models for reloading
             OVMS_PROFILE_SYNC_BEGIN("Try deferred nodes");
             for (auto it = deferredNodeSessions.begin(); it != deferredNodeSessions.end();) {
                 auto& [nodeRef, sessionKey] = *it;

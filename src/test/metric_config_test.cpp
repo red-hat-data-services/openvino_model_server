@@ -72,8 +72,10 @@ public:
 
     void SetUp() override {
         TestWithTempDir::SetUp();
-        char* n_argv[] = {(char*)"ovms", (char*)"--model_path", (char*)"/path/to/model", (char*)"--model_name", (char*)"some_name"};
-        int arg_count = 5;
+        std::string port{"9000"};
+        randomizeAndEnsureFree(port);
+        char* n_argv[] = {(char*)"ovms", (char*)"--model_path", (char*)"/path/to/model", (char*)"--model_name", (char*)"some_name", (char*)"--port", (char*)port.c_str()};
+        int arg_count = 7;
         ovms::Config::instance().parse(arg_count, n_argv);
 
         // Prepare manager
@@ -112,7 +114,7 @@ std::string createModelMetricsChangedConfig() {
 
 TEST_F(MetricsConfigNegativeTest, MissingPort) {
     SetUpConfig(createModelMetricsChangedConfig());
-    std::filesystem::copy("/ovms/src/test/dummy", modelPath, std::filesystem::copy_options::recursive);
+    std::filesystem::copy(getGenericFullPathForSrcTest("/ovms/src/test/dummy"), modelPath, std::filesystem::copy_options::recursive);
     createConfigFileWithContent(ovmsConfig, configFilePath);
 
     ConstructorEnabledModelManager manager;
@@ -139,7 +141,7 @@ static const char* modelDefaultConfig = R"(
 
 TEST_F(MetricsConfigTest, DefaultValues) {
     SetUpConfig(modelDefaultConfig);
-    std::filesystem::copy("/ovms/src/test/dummy", modelPath, std::filesystem::copy_options::recursive);
+    std::filesystem::copy(getGenericFullPathForSrcTest("/ovms/src/test/dummy"), modelPath, std::filesystem::copy_options::recursive);
     createConfigFileWithContent(ovmsConfig, configFilePath);
 
     ConstructorEnabledModelManager manager;
@@ -155,7 +157,7 @@ TEST_F(MetricsConfigTest, DefaultValues) {
 
 TEST_F(MetricsConfigTest, ChangedValues) {
     SetUpConfig(createModelMetricsChangedConfig());
-    std::filesystem::copy("/ovms/src/test/dummy", modelPath, std::filesystem::copy_options::recursive);
+    std::filesystem::copy(getGenericFullPathForSrcTest("/ovms/src/test/dummy"), modelPath, std::filesystem::copy_options::recursive);
     createConfigFileWithContent(ovmsConfig, configFilePath);
 
     ConstructorEnabledModelManager manager;
@@ -201,7 +203,7 @@ std::string createModelMetricsBadListConfig() {
 
 TEST_F(MetricsConfigTest, BadFamilyConfig) {
     SetUpConfig(createModelMetricsBadListConfig());
-    std::filesystem::copy("/ovms/src/test/dummy", modelPath, std::filesystem::copy_options::recursive);
+    std::filesystem::copy(getGenericFullPathForSrcTest("/ovms/src/test/dummy"), modelPath, std::filesystem::copy_options::recursive);
     createConfigFileWithContent(ovmsConfig, configFilePath);
 
     ConstructorEnabledModelManager manager;
@@ -212,7 +214,7 @@ TEST_F(MetricsConfigTest, BadFamilyConfig) {
 
 TEST_F(MetricsConfigTest, InitOnce) {
     SetUpConfig(createModelMetricsChangedConfig());
-    std::filesystem::copy("/ovms/src/test/dummy", modelPath, std::filesystem::copy_options::recursive);
+    std::filesystem::copy(getGenericFullPathForSrcTest("/ovms/src/test/dummy"), modelPath, std::filesystem::copy_options::recursive);
     createConfigFileWithContent(ovmsConfig, configFilePath);
 
     ConstructorEnabledModelManager manager;
@@ -232,6 +234,29 @@ TEST_F(MetricsConfigTest, InitOnce) {
     ASSERT_TRUE(metricConfig2.isFamilyEnabled(METRIC_NAME_REQUESTS_SUCCESS));
     ASSERT_TRUE(metricConfig2.isFamilyEnabled(METRIC_NAME_INFER_REQ_QUEUE_SIZE));
     ASSERT_EQ(metricConfig2.isFamilyEnabled(METRIC_NAME_REQUESTS_FAIL), false);
+}
+
+TEST_F(MetricsConfigTest, StartSingleGraphWithMetrics) {
+    ConstructorEnabledModelManager manager;
+
+    // Serve mediapipe graph with metrics enabled
+    char* n_argv[] = {
+        (char*)"ovms",
+        (char*)"--model_path",
+        (char*)getGenericFullPathForSrcTest("/ovms/src/test/mediapipe/cli").c_str(),
+        (char*)"--model_name",
+        (char*)"some_name",
+        (char*)"--rest_port",
+        (char*)"8080",
+        (char*)"--metrics_enable"};
+    int arg_count = 8;
+    ovms::Config::instance().parse(arg_count, n_argv);
+
+    auto status = manager.startFromConfig();
+    ASSERT_TRUE(status.ok());
+
+    const auto& metricConfig = manager.getMetricConfig();
+    ASSERT_EQ(metricConfig.metricsEnabled, true);
 }
 
 static const char* modelMetricsAllEnabledConfig = R"(
@@ -259,7 +284,7 @@ static const char* modelMetricsAllEnabledConfig = R"(
 
 TEST_F(MetricsConfigTest, MetricsAllEnabledTest) {
     SetUpConfig(modelMetricsAllEnabledConfig);
-    std::filesystem::copy("/ovms/src/test/dummy", modelPath, std::filesystem::copy_options::recursive);
+    std::filesystem::copy(getGenericFullPathForSrcTest("/ovms/src/test/dummy"), modelPath, std::filesystem::copy_options::recursive);
     createConfigFileWithContent(ovmsConfig, configFilePath);
     ConstructorEnabledModelManager manager;
 
@@ -269,10 +294,28 @@ TEST_F(MetricsConfigTest, MetricsAllEnabledTest) {
     const auto& metricConfig = manager.getMetricConfig();
     ASSERT_EQ(metricConfig.metricsEnabled, true);
     ASSERT_EQ(metricConfig.endpointsPath, "/metrics");
-    ASSERT_TRUE(metricConfig.isFamilyEnabled(METRIC_NAME_REQUESTS_SUCCESS));
-    // Non default metric
-    ASSERT_EQ(metricConfig.isFamilyEnabled(METRIC_NAME_INFER_REQ_QUEUE_SIZE), false);
-    ASSERT_TRUE(metricConfig.isFamilyEnabled(METRIC_NAME_REQUESTS_FAIL));
+
+    for (const auto& metricName : std::unordered_set<std::string>{
+             {METRIC_NAME_CURRENT_REQUESTS},         // single & dag
+             {METRIC_NAME_REQUESTS_SUCCESS},         // single & dag
+             {METRIC_NAME_REQUESTS_FAIL},            // single & dag
+             {METRIC_NAME_REQUEST_TIME},             // single & dag
+             {METRIC_NAME_STREAMS},                  // single & dag
+             {METRIC_NAME_INFERENCE_TIME},           // single & dag
+             {METRIC_NAME_WAIT_FOR_INFER_REQ_TIME},  // single & dag
+             {METRIC_NAME_CURRENT_GRAPHS},           // mediapipe
+             {METRIC_NAME_REQUESTS_ACCEPTED},        // mediapipe
+             {METRIC_NAME_REQUESTS_REJECTED},        // mediapipe
+             {METRIC_NAME_RESPONSES}}) {             // mediapipe
+        ASSERT_TRUE(metricConfig.isFamilyEnabled(metricName));
+    }
+
+    // Non default metric are disabled
+    for (const auto& metricName : std::unordered_set<std::string>{
+             {METRIC_NAME_INFER_REQ_QUEUE_SIZE},  // single & dag
+             {METRIC_NAME_INFER_REQ_ACTIVE}}) {   // single & dag
+        ASSERT_FALSE(metricConfig.isFamilyEnabled(metricName));
+    }
 }
 
 static const char* modelMetricsBadEndpoint = R"(
@@ -301,7 +344,7 @@ static const char* modelMetricsBadEndpoint = R"(
 
 TEST_F(MetricsConfigTest, DISABLED_MetricsBadEndpoint) {
     SetUpConfig(modelMetricsBadEndpoint);
-    std::filesystem::copy("/ovms/src/test/dummy", modelPath, std::filesystem::copy_options::recursive);
+    std::filesystem::copy(getGenericFullPathForSrcTest("/ovms/src/test/dummy"), modelPath, std::filesystem::copy_options::recursive);
     createConfigFileWithContent(ovmsConfig, configFilePath);
     ConstructorEnabledModelManager manager;
 
@@ -335,7 +378,7 @@ static const char* MetricsNegativeAdditionalMember = R"(
 
 TEST_F(MetricsConfigTest, MetricsNegativeAdditionalMember) {
     SetUpConfig(MetricsNegativeAdditionalMember);
-    std::filesystem::copy("/ovms/src/test/dummy", modelPath, std::filesystem::copy_options::recursive);
+    std::filesystem::copy(getGenericFullPathForSrcTest("/ovms/src/test/dummy"), modelPath, std::filesystem::copy_options::recursive);
     createConfigFileWithContent(ovmsConfig, configFilePath);
     ConstructorEnabledModelManager manager;
 
@@ -368,7 +411,7 @@ static const char* MetricsNegativeBadMember = R"(
 
 TEST_F(MetricsConfigTest, MetricsNegativeBadMember) {
     SetUpConfig(MetricsNegativeBadMember);
-    std::filesystem::copy("/ovms/src/test/dummy", modelPath, std::filesystem::copy_options::recursive);
+    std::filesystem::copy(getGenericFullPathForSrcTest("/ovms/src/test/dummy"), modelPath, std::filesystem::copy_options::recursive);
     createConfigFileWithContent(ovmsConfig, configFilePath);
     ConstructorEnabledModelManager manager;
 
@@ -401,7 +444,7 @@ static const char* MetricsNegativeBadJson = R"(
 
 TEST_F(MetricsConfigTest, MetricsNegativeBadJson) {
     SetUpConfig(MetricsNegativeBadJson);
-    std::filesystem::copy("/ovms/src/test/dummy", modelPath, std::filesystem::copy_options::recursive);
+    std::filesystem::copy(getGenericFullPathForSrcTest("/ovms/src/test/dummy"), modelPath, std::filesystem::copy_options::recursive);
     createConfigFileWithContent(ovmsConfig, configFilePath);
     ConstructorEnabledModelManager manager;
 
@@ -434,7 +477,7 @@ static const char* MetricsNegativeBadType = R"(
 
 TEST_F(MetricsConfigTest, MetricsNegativeBadType) {
     SetUpConfig(MetricsNegativeBadType);
-    std::filesystem::copy("/ovms/src/test/dummy", modelPath, std::filesystem::copy_options::recursive);
+    std::filesystem::copy(getGenericFullPathForSrcTest("/ovms/src/test/dummy"), modelPath, std::filesystem::copy_options::recursive);
     createConfigFileWithContent(ovmsConfig, configFilePath);
     ConstructorEnabledModelManager manager;
 

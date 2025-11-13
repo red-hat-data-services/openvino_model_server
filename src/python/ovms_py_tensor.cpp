@@ -18,15 +18,45 @@
 
 #include <functional>
 #include <numeric>
+#include <optional>
 #include <string>
 #include <vector>
 
+#pragma warning(push)
+#pragma warning(disable : 6326 28182 6011 28020)
 #include <pybind11/pybind11.h>
+#pragma warning(pop)
 
 namespace py = pybind11;
 using namespace ovms;
 
-OvmsPyTensor::OvmsPyTensor(const std::string& name, void* data, const std::vector<py::ssize_t>& shape, const std::string& datatype, py::ssize_t size, bool copy) :
+#pragma warning(push)
+#pragma warning(disable : 4244)
+OvmsPyTensor::OvmsPyTensor(const std::string& name, const py::buffer& buffer, const std::optional<std::vector<py::ssize_t>>& shape, const std::optional<std::string>& datatype) :
+    name(name),
+    refObj(buffer) {
+    py::buffer_info bufferInfo = buffer.request();
+    ptr = bufferInfo.ptr;
+    bufferShape = bufferInfo.shape;
+    ndim = bufferInfo.ndim;
+    format = bufferInfo.format;
+    itemsize = bufferInfo.itemsize;
+    strides = bufferInfo.strides;
+
+    size = std::accumulate(std::begin(bufferShape), std::end(bufferShape), 1, std::multiplies<py::ssize_t>()) * itemsize;
+
+    userShape = shape.value_or(bufferShape);
+
+    if (datatype.has_value()) {
+        this->datatype = datatype.value();
+    } else {
+        auto it = bufferFormatToDatatype.find(format);
+        this->datatype = it != bufferFormatToDatatype.end() ? it->second : format;
+    }
+}
+#pragma warning(pop)
+
+OvmsPyTensor::OvmsPyTensor(const std::string& name, const std::vector<py::ssize_t>& shape, const std::string& datatype, py::ssize_t size, bool allocate) :
     name(name),
     datatype(datatype),
     userShape(shape),
@@ -50,28 +80,19 @@ OvmsPyTensor::OvmsPyTensor(const std::string& name, void* data, const std::vecto
             strides.insert(strides.begin(), stride);
         }
     }
-    if (copy) {
+    if (allocate) {
         ownedDataPtr = std::make_unique<char[]>(size);
-        memcpy(this->ownedDataPtr.get(), data, size);
         ptr = this->ownedDataPtr.get();
     } else {
-        ptr = data;
+        ptr = nullptr;
     }
 }
 
-OvmsPyTensor::OvmsPyTensor(const std::string& name, const py::buffer& buffer) :
-    name(name),
-    refObj(buffer) {
-    py::buffer_info bufferInfo = buffer.request();
-    ptr = bufferInfo.ptr;
-    bufferShape = bufferInfo.shape;
-    ndim = bufferInfo.ndim;
-    format = bufferInfo.format;
-    itemsize = bufferInfo.itemsize;
-    strides = bufferInfo.strides;
-
-    size = std::accumulate(std::begin(bufferShape), std::end(bufferShape), 1, std::multiplies<py::ssize_t>()) * itemsize;
-    userShape = bufferShape;
-    auto it = bufferFormatToDatatype.find(format);
-    datatype = it != bufferFormatToDatatype.end() ? it->second : format;
+OvmsPyTensor::OvmsPyTensor(const std::string& name, void* data, const std::vector<py::ssize_t>& shape, const std::string& datatype, py::ssize_t size, bool copy) :
+    OvmsPyTensor(name, shape, datatype, size, /*allocate=*/copy) {
+    if (copy) {
+        memcpy(this->ownedDataPtr.get(), data, size);
+    } else {
+        ptr = data;
+    }
 }

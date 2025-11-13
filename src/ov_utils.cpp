@@ -18,11 +18,10 @@
 #include <algorithm>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <vector>
-
-#include <spdlog/spdlog.h>
 
 #include "logging.hpp"
 #include "profiler.hpp"
@@ -48,9 +47,9 @@ std::string getTensorMapString(const std::map<std::string, std::shared_ptr<const
     for (const auto& pair : inputsInfo) {
         const auto& name = pair.first;
         auto inputInfo = pair.second;
-        auto precision = inputInfo->getPrecision();
-        auto layout = inputInfo->getLayout();
-        auto shape = inputInfo->getShape();
+        const auto precision = inputInfo->getPrecision();
+        const auto& layout = inputInfo->getLayout();
+        const auto& shape = inputInfo->getShape();
 
         stringStream << "\nname: " << name
                      << "; mapping: " << inputInfo->getMappedName()
@@ -63,9 +62,17 @@ std::string getTensorMapString(const std::map<std::string, std::shared_ptr<const
 
 Status tensorClone(ov::Tensor& destinationTensor, const ov::Tensor& sourceTensor) {
     OVMS_PROFILE_FUNCTION();
+    if (sourceTensor.get_element_type() == ov::element::Type_t::string) {
+        destinationTensor = ov::Tensor(sourceTensor.get_element_type(), sourceTensor.get_shape());
+        std::string* srcData = sourceTensor.data<std::string>();
+        std::string* destData = destinationTensor.data<std::string>();
+        for (size_t i = 0; i < sourceTensor.get_shape()[0]; i++) {
+            destData[i].assign(srcData[i]);
+        }
+        return StatusCode::OK;
+    }
     OV_LOGGER("ov::Tensor(ov::element::type, shape)");
     destinationTensor = ov::Tensor(sourceTensor.get_element_type(), sourceTensor.get_shape());
-
     if (destinationTensor.get_byte_size() != sourceTensor.get_byte_size()) {
         SPDLOG_ERROR("tensorClone byte size mismatch destination:{}; source:{}",
             destinationTensor.get_byte_size(),
@@ -82,7 +89,7 @@ std::optional<ov::Layout> getLayoutFromRTMap(const ov::RTMap& rtMap) {
         try {
             OV_LOGGER("v.as<ov::LayoutAttribute>().value");
             return v.as<ov::LayoutAttribute>().value;
-        } catch (ov::Exception& e) {
+        } catch (ov::Exception&) {
         }
     }
     return std::nullopt;
@@ -115,11 +122,18 @@ Status validatePluginConfiguration(const plugin_config_t& pluginConfig, const st
         std::string deviceName;
 
         while (getline(ss, deviceName, deviceDelimiter)) {
+            char bracket = '(';
+            auto bracketPos = deviceName.find(bracket);
+            if (bracketPos != std::string::npos) {
+                deviceName = deviceName.substr(0, bracketPos);
+            }
             insertSupportedKeys(pluginSupportedConfigKeys, deviceName, ieCore);
         }
     } else {
         insertSupportedKeys(pluginSupportedConfigKeys, targetDevice, ieCore);
     }
+
+    pluginSupportedConfigKeys.insert("ENABLE_MMAP");  // WA: always supported
 
     for (auto& config : pluginConfig) {
         if (std::find(pluginSupportedConfigKeys.begin(), pluginSupportedConfigKeys.end(), config.first) == pluginSupportedConfigKeys.end()) {

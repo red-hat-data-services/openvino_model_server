@@ -25,24 +25,20 @@
 #include "../logging.hpp"
 #include "../status.hpp"
 
-#if (PYTHON_DISABLE == 0)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#include "mediapipe/framework/calculator_graph.h"
-#pragma GCC diagnostic pop
+#pragma warning(push)
+#pragma warning(disable : 6326 28182 6011 28020)
 #include <pybind11/embed.h>  // everything needed for embedding
+#pragma warning(pop)
 
-#include "src/mediapipe_calculators/python_executor_calculator_options.pb.h"
-#endif
-#include "../mediapipe_internal/mediapipegraphdefinition.hpp"
+#include "../mediapipe_internal/mediapipe_utils.hpp"
+#include "src/python/python_executor_calculator.pb.h"
 
 namespace ovms {
 
-#if (PYTHON_DISABLE == 0)
 PythonNodeResources::PythonNodeResources(PythonBackend* pythonBackend) {
     this->ovmsPythonModel = nullptr;
     this->pythonBackend = pythonBackend;
-    this->pythonNodeFilePath = "";
+    this->handlerPath = "";
 }
 
 void PythonNodeResources::finalize() {
@@ -50,16 +46,16 @@ void PythonNodeResources::finalize() {
         py::gil_scoped_acquire acquire;
         try {
             if (!py::hasattr(*ovmsPythonModel.get(), "finalize")) {
-                SPDLOG_DEBUG("Python node resource does not have a finalize method. Python node path {} ", this->pythonNodeFilePath);
+                SPDLOG_DEBUG("Python node resource does not have a finalize method. Python node handler_path: {} ", this->handlerPath);
                 return;
             }
 
             ovmsPythonModel.get()->attr("finalize")();
         } catch (const pybind11::error_already_set& e) {
-            SPDLOG_ERROR("Failed to process python node finalize method. {}  Python node path {} ", e.what(), this->pythonNodeFilePath);
+            SPDLOG_ERROR("Failed to process python node finalize method. {}  Python node handler_path: {} ", e.what(), this->handlerPath);
             return;
         } catch (...) {
-            SPDLOG_ERROR("Failed to process python node finalize method. Python node path {} ", this->pythonNodeFilePath);
+            SPDLOG_ERROR("Failed to process python node finalize method. Python node handler_path: {} ", this->handlerPath);
             return;
         }
     }
@@ -68,22 +64,23 @@ void PythonNodeResources::finalize() {
 // IMPORTANT: This is an internal method meant to be run in a specific context.
 // It assumes GIL is being held by the thread and doesn't handle potential errors.
 // It MUST be called in the scope of py::gil_scoped_acquire and within the try - catch block
-py::dict PythonNodeResources::preparePythonNodeInitializeArguments(const ::mediapipe::CalculatorGraphConfig::Node& graphNodeConfig) {
+py::dict PythonNodeResources::preparePythonNodeInitializeArguments(const ::mediapipe::CalculatorGraphConfig::Node& graphNodeConfig, const std::string& basePath) {
     py::dict kwargsParam = py::dict();
     std::string nodeName = graphNodeConfig.name();
     py::list inputStreams = py::list();
     py::list outputStreams = py::list();
     for (auto& name : graphNodeConfig.input_stream()) {
-        inputStreams.append(MediapipeGraphDefinition::getStreamName(name));
+        inputStreams.append(getStreamName(name));
     }
 
     for (auto& name : graphNodeConfig.output_stream()) {
-        outputStreams.append(MediapipeGraphDefinition::getStreamName(name));
+        outputStreams.append(getStreamName(name));
     }
 
     kwargsParam["input_names"] = inputStreams;
     kwargsParam["output_names"] = outputStreams;
     kwargsParam["node_name"] = nodeName;
+    kwargsParam["base_path"] = py::str(basePath);
 
     return kwargsParam;
 }
@@ -115,44 +112,62 @@ void createOutputTagNameMapping(std::shared_ptr<PythonNodeResources>& nodeResour
     }
 }
 
-Status PythonNodeResources::createPythonNodeResources(std::shared_ptr<PythonNodeResources>& nodeResources, const ::mediapipe::CalculatorGraphConfig::Node& graphNodeConfig, PythonBackend* pythonBackend) {
+Status PythonNodeResources::createPythonNodeResources(std::shared_ptr<PythonNodeResources>& nodeResources, const ::mediapipe::CalculatorGraphConfig::Node& graphNodeConfig, PythonBackend* pythonBackend, std::string graphPath) {
     mediapipe::PythonExecutorCalculatorOptions nodeOptions;
     graphNodeConfig.node_options(0).UnpackTo(&nodeOptions);
-    if (!std::filesystem::exists(nodeOptions.handler_path())) {
-        SPDLOG_LOGGER_DEBUG(modelmanager_logger, "Python node handler_path: {} does not exist. ", nodeOptions.handler_path());
-        return StatusCode::PYTHON_NODE_FILE_DOES_NOT_EXIST;
-    }
 
     nodeResources = std::make_shared<PythonNodeResources>(pythonBackend);
-    nodeResources->pythonNodeFilePath = nodeOptions.handler_path();
     createOutputTagNameMapping(nodeResources, graphNodeConfig);
 
     auto fsHandlerPath = std::filesystem::path(nodeOptions.handler_path());
+
+    std::string basePath;
+    std::string extension = fsHandlerPath.extension().string();
     fsHandlerPath.replace_extension();
-
-    std::string parentPath = fsHandlerPath.parent_path();
-    std::string filename = fsHandlerPath.filename();
-
+    std::string filename = fsHandlerPath.filename().string();
+    if (fsHandlerPath.is_relative()) {
+        basePath = (std::filesystem::path(graphPath) / fsHandlerPath.parent_path()).string();
+    } else {
+        basePath = fsHandlerPath.parent_path().string();
+    }
+    auto hpath = std::filesystem::path(basePath) / std::filesystem::path(filename + extension);
+    // Make final handler path uniform with forward slashes as separators
+    std::string hpathStr = hpath.string();
+    std::replace(hpathStr.begin(), hpathStr.end(), '\\', '/');  // Replace backslashes with forward slashes
+    nodeResources->handlerPath = hpathStr;
+    if (!std::filesystem::exists(hpathStr)) {
+        SPDLOG_LOGGER_ERROR(modelmanager_logger, "Python node handler_path: {} does not exist. ", hpath.string());
+        return StatusCode::PYTHON_NODE_FILE_DOES_NOT_EXIST;
+    }
     py::gil_scoped_acquire acquire;
     try {
         py::module_ sys = py::module_::import("sys");
-        sys.attr("path").attr("append")(parentPath.c_str());
+        sys.attr("path").attr("append")(basePath.c_str());
         py::module_ script = py::module_::import(filename.c_str());
 
-        py::object OvmsPythonModel = script.attr("OvmsPythonModel");
-        nodeResources->ovmsPythonModel = std::make_unique<py::object>(OvmsPythonModel());
+        if (!py::hasattr(script, "OvmsPythonModel")) {
+            SPDLOG_ERROR("Error during python node initialization. No OvmsPythonModel class found in {}", nodeOptions.handler_path());
+            return StatusCode::PYTHON_NODE_FILE_STATE_INITIALIZATION_FAILED;
+        }
 
+        py::object OvmsPythonModel = script.attr("OvmsPythonModel");
+        if (!py::hasattr(OvmsPythonModel, "execute")) {
+            SPDLOG_ERROR("Error during python node initialization. OvmsPythonModel class defined in {} does not implement execute method.", nodeOptions.handler_path());
+            return StatusCode::PYTHON_NODE_FILE_STATE_INITIALIZATION_FAILED;
+        }
+
+        nodeResources->ovmsPythonModel = std::make_unique<py::object>(OvmsPythonModel());
         if (py::hasattr(*nodeResources->ovmsPythonModel, "initialize")) {
-            py::dict kwargsParam = preparePythonNodeInitializeArguments(graphNodeConfig);
+            py::dict kwargsParam = preparePythonNodeInitializeArguments(graphNodeConfig, basePath);
             nodeResources->ovmsPythonModel->attr("initialize")(kwargsParam);
         } else {
-            SPDLOG_DEBUG("OvmsPythonModel class does not have an initialize method. Python node path {} ", nodeOptions.handler_path());
+            SPDLOG_DEBUG("OvmsPythonModel class defined in {} does not implement initialize method.", nodeOptions.handler_path());
         }
     } catch (const pybind11::error_already_set& e) {
-        SPDLOG_ERROR("Failed to process python node file {} : {}", nodeOptions.handler_path(), e.what());
+        SPDLOG_ERROR("Error during python node initialization for handler_path: {} - {}", nodeOptions.handler_path(), e.what());
         return StatusCode::PYTHON_NODE_FILE_STATE_INITIALIZATION_FAILED;
     } catch (...) {
-        SPDLOG_ERROR("Failed to process python node file {}", nodeOptions.handler_path());
+        SPDLOG_ERROR("Error during python node initialization for handler_path: {}", nodeOptions.handler_path());
         return StatusCode::PYTHON_NODE_FILE_STATE_INITIALIZATION_FAILED;
     }
     return StatusCode::OK;
@@ -164,6 +179,5 @@ PythonNodeResources::~PythonNodeResources() {
     py::gil_scoped_acquire acquire;
     this->ovmsPythonModel.reset();
 }
-#endif
 
 }  // namespace ovms

@@ -18,7 +18,7 @@
 
 namespace ovms {
 
-const std::unordered_map<const StatusCode, const std::string> Status::statusMessageMap = {
+const std::unordered_map<StatusCode, std::string> Status::statusMessageMap = {
     {StatusCode::OK, ""},
 
     {StatusCode::PATH_INVALID, "The provided base path is invalid or doesn't exists"},
@@ -74,6 +74,8 @@ const std::unordered_map<const StatusCode, const std::string> Status::statusMess
     {StatusCode::INVALID_BATCH_DIMENSION, "Invalid batch dimension in shape"},
     {StatusCode::LAYOUT_INCOMPATIBLE_WITH_SHAPE, "Layout incompatible with given shape"},
     {StatusCode::MODEL_WITH_SCALAR_AUTO_UNSUPPORTED, "Batching set to AUTO but model contains scalar tensor"},
+    {StatusCode::OV_NO_INPUTS, "Cannot load model with no inputs"},
+    {StatusCode::OV_NO_OUTPUTS, "Cannot load model with no outputs"},
     {StatusCode::ALLOW_CACHE_WITH_CUSTOM_LOADER, "allow_cache is set to true with custom loader usage"},
     {StatusCode::UNKNOWN_ERROR, "Unknown error"},
 
@@ -128,6 +130,8 @@ const std::unordered_map<const StatusCode, const std::string> Status::statusMess
     {StatusCode::REST_INVALID_URL, "Invalid request URL"},
     {StatusCode::REST_UNSUPPORTED_METHOD, "Unsupported method"},
     {StatusCode::UNKNOWN_REQUEST_COMPONENTS_TYPE, "Request components type not recognized"},
+    {StatusCode::FAILED_TO_PARSE_MULTIPART_CONTENT_TYPE, "Request of multipart type but failed to parse"},
+    {StatusCode::FAILED_TO_DEDUCE_MODEL_NAME_FROM_URI, "Failed to deduce model name from all possible ways"},
 
     // Rest parser failure
     {StatusCode::REST_BODY_IS_NOT_AN_OBJECT, "Request body should be JSON object"},
@@ -149,6 +153,7 @@ const std::unordered_map<const StatusCode, const std::string> Status::statusMess
     {StatusCode::REST_UNSUPPORTED_PRECISION, "Could not parse input content. Unsupported data precision detected"},
     {StatusCode::REST_SERIALIZE_TENSOR_CONTENT_INVALID_SIZE, "Size of data in tensor_content does not match declared tensor shape"},
     {StatusCode::REST_SERIALIZE_VAL_FIELD_INVALID_SIZE, "Number of elements in xxx_val field does not match declared tensor shape"},
+    {StatusCode::REST_INFERENCE_HEADER_CONTENT_LENGTH_EXCEEDED, "Inference-Header-Content-Length header exceeds actual payload length"},
     {StatusCode::REST_BINARY_DATA_SIZE_PARAMETER_INVALID, "binary_data_size parameter is invalid and cannot be parsed"},
     {StatusCode::REST_BINARY_BUFFER_EXCEEDED, "Received buffer size is smaller than binary_data_size parameter indicates"},
     {StatusCode::REST_INFERENCE_HEADER_CONTENT_LENGTH_INVALID, "Inference-Header-Content-Length header is invalid and couldn't be parsed"},
@@ -160,7 +165,7 @@ const std::unordered_map<const StatusCode, const std::string> Status::statusMess
     {StatusCode::PIPELINE_MULTIPLE_ENTRY_NODES, "Pipeline definition has multiple request nodes"},
     {StatusCode::PIPELINE_MULTIPLE_EXIT_NODES, "Pipeline definition has multiple response nodes"},
     {StatusCode::PIPELINE_MISSING_ENTRY_OR_EXIT, "Pipeline definition is missing request or response node"},
-    {StatusCode::PIPELINE_DEFINITION_NAME_MISSING, "Model with requested name is not found"},
+    {StatusCode::PIPELINE_DEFINITION_NAME_MISSING, "Pipeline with requested name is not found"},
     {StatusCode::PIPELINE_NODE_NAME_DUPLICATE, "Pipeline definition has multiple nodes with the same name"},
     {StatusCode::PIPELINE_CYCLE_FOUND, "Pipeline definition contains a cycle"},
     {StatusCode::PIPELINE_CONTAINS_UNCONNECTED_NODES, "Pipeline definition has unconnected nodes"},
@@ -190,16 +195,17 @@ const std::unordered_map<const StatusCode, const std::string> Status::statusMess
     {StatusCode::PIPELINE_WRONG_DEMULTIPLEXER_GATHER_NODES_ORDER, "Demultiplexer and gather nodes are not in LIFO order"},
     {StatusCode::PIPELINE_DEMULTIPLEXER_NO_RESULTS, "Pipeline execution aborted due to no content from custom node"},
     {StatusCode::PIPELINE_INPUTS_AMBIGUOUS_METADATA, "Multiple nodes connected to the same pipeline input require different tensor metadata"},
+    {StatusCode::PIPELINE_STRING_DEMUILTIPLICATION_UNSUPPORTED, "Demultiplication is not supported for string precision"},
 
     // Mediapipe
     {StatusCode::MEDIAPIPE_DESERIALIZATION_ERROR, "Failed to deserialize tensor for mediapipe graph"},
     {StatusCode::MEDIAPIPE_GRAPH_START_ERROR, "Failed to start mediapipe graph"},
     {StatusCode::MEDIAPIPE_GRAPH_CONFIG_FILE_INVALID, "Failed to read protobuf graph configuration file"},
-    {StatusCode::MEDIAPIPE_GRAPH_INITIALIZATION_ERROR, "Failed to initalize mediapipe graph"},
+    {StatusCode::MEDIAPIPE_GRAPH_INITIALIZATION_ERROR, "Failed to initialize mediapipe graph"},
     {StatusCode::MEDIAPIPE_GRAPH_ADD_OUTPUT_STREAM_ERROR, "Failed to add mediapipe graph output stream"},
     {StatusCode::MEDIAPIPE_GRAPH_CLOSE_INPUT_STREAM_ERROR, "Failed to close mediapipe graph input stream"},
     {StatusCode::MEDIAPIPE_GRAPH_ADD_PACKET_INPUT_STREAM, "Failed to add packet to mediapipe graph input stream"},
-    {StatusCode::MEDIAPIPE_DEFINITION_NAME_MISSING, "Model with requested name is not found"},
+    {StatusCode::MEDIAPIPE_DEFINITION_NAME_MISSING, "Mediapipe graph definition with requested name is not found"},
     {StatusCode::MEDIAPIPE_EXECUTION_ERROR, "Mediapipe execution failed. MP status"},
     {StatusCode::MEDIAPIPE_DEFINITION_NOT_LOADED_ANYMORE, "Mediapipe is retired"},
     {StatusCode::MEDIAPIPE_DEFINITION_NOT_LOADED_YET, "Mediapipe is not loaded yet"},
@@ -215,6 +221,7 @@ const std::unordered_map<const StatusCode, const std::string> Status::statusMess
     {StatusCode::MEDIAPIPE_UNINITIALIZED_STREAM_CLOSURE, "Client disconnected during reading first streaming request"},
     {StatusCode::MEDIAPIPE_INCORRECT_SERVABLE_NAME, "Subsequent request with incorrect servable name"},
     {StatusCode::MEDIAPIPE_INCORRECT_SERVABLE_VERSION, "Subsequent request with incorrect servable version"},
+    {StatusCode::MEDIAPIPE_PRECONDITION_FAILED, "Mediapipe graph precondition failed"},
 
     // Python Nodes
     {StatusCode::PYTHON_NODE_NAME_ALREADY_EXISTS, "The Python Node name is already present in nodes list"},
@@ -222,6 +229,14 @@ const std::unordered_map<const StatusCode, const std::string> Status::statusMess
     {StatusCode::PYTHON_NODE_FILE_STATE_INITIALIZATION_FAILED, "The Python Node state initialization failed"},
     {StatusCode::PYTHON_NODE_MISSING_OPTIONS, "The Python Node is missing options definition"},
     {StatusCode::PYTHON_NODE_MISSING_NAME, "The Python Node is missing name definition"},
+
+    // LLM Nodes
+    {StatusCode::LLM_NODE_NAME_ALREADY_EXISTS, "The LLM Node name is already present in nodes list"},
+    {StatusCode::LLM_NODE_DIRECTORY_DOES_NOT_EXIST, "The LLM Node workspace path does not exist"},
+    {StatusCode::LLM_NODE_PATH_DOES_NOT_EXIST_AND_NOT_GGUFFILE, "The LLM Node workspace path does not exist and not gguf model file"},
+    {StatusCode::LLM_NODE_RESOURCE_STATE_INITIALIZATION_FAILED, "The LLM Node resource initialization failed"},
+    {StatusCode::LLM_NODE_MISSING_OPTIONS, "The LLM Node is missing options definition"},
+    {StatusCode::LLM_NODE_MISSING_NAME, "The LLM Node is missing name definition"},
 
     // Storage errors
     // S3
@@ -303,6 +318,7 @@ const std::unordered_map<const StatusCode, const std::string> Status::statusMess
     {StatusCode::DOUBLE_TENSOR_INSERT, "Cannot insert more than one tensor with the same name"},
     {StatusCode::DOUBLE_PARAMETER_INSERT, "Cannot insert more than one parameter with the same name"},
     {StatusCode::NONEXISTENT_BUFFER_FOR_REMOVAL, "Tried to remove nonexisting buffer"},
+    {StatusCode::NONEXISTENT_BUFFER, "Output does not contain buffer"},
     {StatusCode::NONEXISTENT_PARAMETER, "Tried to use nonexisting parameter"},
     {StatusCode::NONEXISTENT_TENSOR, "Tried to get nonexisting tensor"},
     {StatusCode::NONEXISTENT_TENSOR_FOR_SET_BUFFER, "Tried to set buffer for nonexisting tensor"},
@@ -319,5 +335,18 @@ const std::unordered_map<const StatusCode, const std::string> Status::statusMess
     {StatusCode::SERVER_ALREADY_STARTED, "Server has already started"},
     {StatusCode::SERVER_ALREADY_STARTING, "Server is already starting"},
     {StatusCode::MODULE_ALREADY_INSERTED, "Module already inserted"},
+
+    // Huggingface model download errors for libgit2
+    {StatusCode::HF_FAILED_TO_INIT_LIBGIT2, "Failed to initialize libgit2 library"},
+    {StatusCode::HF_FAILED_TO_INIT_OPTIMUM_CLI, "Failed to run optimum-cli executable"},
+    {StatusCode::HF_RUN_OPTIMUM_CLI_EXPORT_FAILED, "Failed to run optimum-cli export command"},
+    {StatusCode::HF_GIT_CLONE_FAILED, "Failed in libgit2 execution of clone method"},
+
+    {StatusCode::PARTIAL_END, "Request has finished and no further communication is needed"},
+    {StatusCode::NONEXISTENT_PATH, "Nonexistent path"},
+    {StatusCode::DEFAULT_EXCEEDS_MAXIMUM_ALLOWED_RESOLUTION, "Default exceeds maximum allowed resolution"},
+    {StatusCode::DEVICE_WRONG_FORMAT, "Device is in wrong format"},
+    {StatusCode::SHAPE_DYNAMIC_BUT_NPU_USED, "Shape is dynamic but NPU is used"},
+    {StatusCode::STATIC_RESOLUTION_MISUSE, "Wrong usage of static resolution"},
 };
 }  // namespace ovms

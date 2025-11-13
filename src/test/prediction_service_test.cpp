@@ -27,21 +27,33 @@
 #include <openvino/openvino.hpp>
 #include <stdlib.h>
 
+#include "../capi_frontend/capi_utils.hpp"
+#include "../tfs_frontend/tfs_utils.hpp"
+#include "../kfs_frontend/kfs_utils.hpp"
+#include "../capi_frontend/deserialization.hpp"
+#include "../tfs_frontend/deserialization.hpp"
+#include "../kfs_frontend/deserialization.hpp"
+#include "../deserialization_main.hpp"
+
+#include "../capi_frontend/serialization.hpp"
+#include "../kfs_frontend/serialization.hpp"
+#include "../tfs_frontend/serialization.hpp"
+
+#include "kfs_frontend/kfs_request_utils.hpp"
+#include "tfs_frontend/tfs_request_utils.hpp"
+#include "../inference_executor.hpp"
+
 #include "../capi_frontend/buffer.hpp"
 #include "../capi_frontend/inferenceparameter.hpp"
 #include "../capi_frontend/inferencerequest.hpp"
 #include "../capi_frontend/inferenceresponse.hpp"
 #include "../capi_frontend/inferencetensor.hpp"
-#include "../deserialization.hpp"
 #include "../executingstreamidguard.hpp"
-#include "../kfs_frontend/kfs_utils.hpp"
 #include "../modelinstance.hpp"
 #include "../modelinstanceunloadguard.hpp"
 #include "../modelversion.hpp"
-#include "../prediction_service_utils.hpp"
+#include "../regularovtensorfactory.hpp"
 #include "../sequence_processing_spec.hpp"
-#include "../serialization.hpp"
-#include "../tfs_frontend/tfs_utils.hpp"
 #include "test_utils.hpp"
 
 using testing::Each;
@@ -139,7 +151,7 @@ public:
         std::unique_ptr<std::future<void>> waitBeforeGettingModelInstance = nullptr,
         std::unique_ptr<std::future<void>> waitBeforePerformInference = nullptr);
 
-    void testConcurrentPredicts(const int initialBatchSize, const uint waitingBeforePerformInferenceCount, const uint waitingBeforeGettingModelCount) {
+    void testConcurrentPredicts(const int initialBatchSize, const uint32_t waitingBeforePerformInferenceCount, const uint32_t waitingBeforeGettingModelCount) {
         ASSERT_GE(20, waitingBeforePerformInferenceCount);
         config.setNireq(20);
         ASSERT_EQ(manager.reloadModelWithVersions(config), ovms::StatusCode::OK_RELOADED);
@@ -163,7 +175,7 @@ public:
                                 std::tuple<ovms::signed_shape_t, ovms::Precision>{{(initialBatchSize + (i % 3)), 10}, ovms::Precision::FP32}}});
                         threadsWaitingBeforeGettingModelInstanceStarted[i].set_value();
                         performPredict(config.getName(), config.getVersion(), request,
-                            std::move(std::make_unique<std::future<void>>(releaseWaitBeforeGettingModelInstance[i].get_future())));
+                            std::make_unique<std::future<void>>(releaseWaitBeforeGettingModelInstance[i].get_future()));
                     }));
         }
         for (auto i = 0u; i < waitingBeforePerformInferenceCount; ++i) {
@@ -177,7 +189,7 @@ public:
                                 std::tuple<ovms::signed_shape_t, ovms::Precision>{{initialBatchSize, 10}, ovms::Precision::FP32}}});
                         threadsWaitingBeforePerformInferenceStarted[i].set_value();
                         performPredict(config.getName(), config.getVersion(), request, nullptr,
-                            std::move(std::make_unique<std::future<void>>(releaseWaitBeforePerformInference[i].get_future())));
+                            std::make_unique<std::future<void>>(releaseWaitBeforePerformInference[i].get_future()));
                     }));
         }
         // sleep to allow all threads to initialize
@@ -202,7 +214,7 @@ public:
         }
     }
 
-    void testConcurrentBsChanges(const int initialBatchSize, const uint numberOfThreads) {
+    void testConcurrentBsChanges(const int initialBatchSize, const uint32_t numberOfThreads) {
         ASSERT_GE(20, numberOfThreads);
         config.setNireq(20);
         ASSERT_EQ(manager.reloadModelWithVersions(config), ovms::StatusCode::OK_RELOADED);
@@ -221,7 +233,7 @@ public:
                                 std::tuple<ovms::signed_shape_t, ovms::Precision>{{(initialBatchSize + i), 10}, ovms::Precision::FP32}}});
                         threadsWaitingBeforeGettingModelInstanceStarted[i].set_value();
                         performPredict(config.getName(), config.getVersion(), request,
-                            std::move(std::make_unique<std::future<void>>(releaseWaitBeforeGettingModelInstance[i].get_future())));
+                            std::make_unique<std::future<void>>(releaseWaitBeforeGettingModelInstance[i].get_future()));
                     }));
         }
         // sleep to allow all threads to initialize
@@ -239,6 +251,51 @@ public:
     }
 
     void checkOutputShape(const ResponseType& response, const ovms::signed_shape_t& shape, const std::string& outputName = "a");
+
+    static void checkOutputValuesString(const TFSResponseType& response, const std::vector<std::string>& expectedValues, const std::string& outputName = PASSTHROUGH_STRING_MODEL_OUTPUT_NAME, bool checkRaw = true) {
+        ASSERT_EQ(response.outputs().size(), 1);
+        ASSERT_EQ(response.outputs().count(outputName), 1);
+        const auto& proto = response.outputs().at(outputName);
+        ASSERT_EQ(proto.string_val().size(), expectedValues.size());
+        for (size_t i = 0; i < expectedValues.size(); i++) {
+            ASSERT_EQ(proto.string_val(i), expectedValues[i]);
+        }
+    }
+
+    static void checkOutputValuesString(const KFSResponse& response, const std::vector<std::string>& expectedValues, const std::string& outputName = PASSTHROUGH_STRING_MODEL_OUTPUT_NAME, bool checkRaw = true) {
+        KFSOutputTensorIteratorType it;
+        size_t bufferId;
+        auto status = getOutput(response, outputName, it, bufferId);
+        ASSERT_TRUE(status.ok()) << "Couldn't find output:" << outputName;
+        auto& responseOutput = *it;
+        ASSERT_EQ(responseOutput.datatype(), "BYTES");
+        ASSERT_EQ(responseOutput.shape().size(), 1);
+        ASSERT_EQ(responseOutput.shape()[0], expectedValues.size());
+        if (checkRaw) {
+            const std::string& data = response.raw_output_contents(bufferId);
+            size_t offset = 0;
+            for (size_t i = 0; i < expectedValues.size(); i++) {
+                ASSERT_GE(data.size(), offset + 4);
+                uint32_t batchLength = *((uint32_t*)(data.data() + offset));
+                ASSERT_EQ(batchLength, expectedValues[i].size());
+                offset += 4;
+                ASSERT_GE(data.size(), offset + batchLength);
+                ASSERT_EQ(std::string(data.data() + offset, batchLength), expectedValues[i]);
+                offset += batchLength;
+            }
+            ASSERT_EQ(offset, data.size());
+        } else {
+            ASSERT_EQ(0, response.raw_output_contents().size());
+            ASSERT_EQ(responseOutput.contents().bytes_contents().size(), expectedValues.size());
+            for (size_t i = 0; i < expectedValues.size(); i++) {
+                ASSERT_EQ(responseOutput.contents().bytes_contents()[i], expectedValues[i]);
+            }
+        }
+    }
+
+    static void checkOutputValuesString(const ovms::InferenceResponse& res, const std::vector<std::string>& expectedValues, const std::string& outputName = PASSTHROUGH_STRING_MODEL_OUTPUT_NAME, bool checkRaw = true) {
+        FAIL() << "not supported";
+    }
 
     static void checkOutputValuesU8(const TFSResponseType& response, const std::vector<uint8_t>& expectedValues, const std::string& outputName = INCREMENT_1x3x4x5_MODEL_OUTPUT_NAME, bool checkRaw = true) {
         ASSERT_EQ(response.outputs().count(outputName), 1);
@@ -289,7 +346,7 @@ public:
         KFSOutputTensorIteratorType it;
         size_t bufferId;
         auto status = getOutput(response, outputName, it, bufferId);
-        ASSERT_TRUE(status.ok()) << "Couln't find output:" << outputName;
+        ASSERT_TRUE(status.ok()) << "Couldn't find output:" << outputName;
         if (response.raw_output_contents().size() > 0) {
             float* buffer = reinterpret_cast<float*>(const_cast<char*>(response.raw_output_contents(bufferId).data()));
             ASSERT_EQ(0, std::memcmp(buffer, expectedValues.data(), expectedValues.size() * sizeof(float)))
@@ -309,7 +366,7 @@ public:
         KFSOutputTensorIteratorType it;
         size_t bufferId;
         auto status = getOutput(response, outputName, it, bufferId);
-        ASSERT_TRUE(status.ok()) << "Couln't find output:" << outputName;
+        ASSERT_TRUE(status.ok()) << "Couldn't find output:" << outputName;
         if (checkRaw) {
             ASSERT_GT(response.raw_output_contents().size(), 0);
             uint8_t* buffer = reinterpret_cast<uint8_t*>(const_cast<char*>(response.raw_output_contents(bufferId).data()));
@@ -335,7 +392,7 @@ public:
             return status;
         }
         response.Clear();
-        return model->infer(&request, &response, unload_guard);
+        return ovms::infer(*model, &request, &response, unload_guard);
     }
 
     ovms::Status performInferenceWithShape(ResponseType& response, const ovms::signed_shape_t& shape = {1, 10}, const ovms::Precision precision = ovms::Precision::FP32) {
@@ -436,7 +493,14 @@ public:
         ModelInstance(UNUSED_SERVABLE_NAME, UNUSED_MODEL_VERSION, ieCore) {}
     template <typename RequestType>
     const ovms::Status mockValidate(const RequestType* request) {
-        return validate(request);
+        return ovms::request_validation_utils::validate(*request,
+            this->getInputsInfo(),
+            this->getOutputsInfo(),
+            this->getName(),
+            this->getVersion(),
+            this->getOptionalInputNames(),
+            this->getModelConfig().getBatchingMode(),
+            this->getModelConfig().getShapes());
     }
 };
 const size_t DUMMY_DIM_POS = 1;
@@ -503,7 +567,10 @@ static void performPrediction(const std::string modelName,
     ovms::InputSink<ov::InferRequest&> inputSink(inferRequest);
     bool isPipeline = false;
 
-    auto status = ovms::deserializePredictRequest<ovms::ConcreteTensorProtoDeserializator>(request, modelInstance->getInputsInfo(), inputSink, isPipeline);
+    std::unordered_map<int, std::shared_ptr<ovms::IOVTensorFactory>> factories;
+    factories.emplace(OVMS_BUFFERTYPE_CPU, std::make_shared<ovms::RegularOVTensorFactory>());
+    auto status = ovms::deserializePredictRequest<ovms::ConcreteTensorProtoDeserializator, ovms::InputSink<ov::InferRequest&>>(request, modelInstance->getInputsInfo(), modelInstance->getOutputsInfo(), inputSink, isPipeline, factories);
+    ASSERT_EQ(status, ovms::StatusCode::OK);
     status = modelInstance->performInference(inferRequest);
     ASSERT_EQ(status, ovms::StatusCode::OK);
     size_t outputSize = requestBatchSize * extractDummyOutputSize(request);
@@ -615,7 +682,7 @@ public:
         modelPath = directoryPath + "/dummy/";
         mappingConfigPath = modelPath + "1/mapping_config.json";
         SetUpConfig(configContent);
-        std::filesystem::copy("/ovms/src/test/dummy", modelPath, std::filesystem::copy_options::recursive);
+        std::filesystem::copy(getGenericFullPathForSrcTest("/ovms/src/test/dummy"), modelPath, std::filesystem::copy_options::recursive);
         createConfigFileWithContent(ovmsConfig, configFilePath);
         createConfigFileWithContent(R"({
             "inputs": {"b":"input_tensor"},
@@ -646,7 +713,7 @@ TYPED_TEST(TestPredictWithMapping, SuccesfullOnPassthrough_2D_U8ModelWithMapping
         GTEST_SKIP() << "String inputs not supported for C-API";
     this->modelPath = this->directoryPath + "/passthrough/";
     this->mappingConfigPath = this->modelPath + "1/mapping_config.json";
-    std::filesystem::copy("/ovms/src/test/passthrough", this->modelPath, std::filesystem::copy_options::recursive);
+    std::filesystem::copy(getGenericFullPathForSrcTest("/ovms/src/test/passthrough"), this->modelPath, std::filesystem::copy_options::recursive);
     this->ovmsConfig = R"(
 {
     "model_config_list": [
@@ -677,7 +744,7 @@ TYPED_TEST(TestPredictWithMapping, SuccesfullOnPassthrough_2D_U8ModelWithMapping
     std::unique_ptr<ovms::ModelInstanceUnloadGuard> modelInstanceUnloadGuard;
     ASSERT_EQ(manager.getModelInstance("passhtrough_u8", 1, modelInstance, modelInstanceUnloadGuard), ovms::StatusCode::OK);
     typename TypeParam::second_type response;
-    ASSERT_EQ(modelInstance->infer(&request, &response, modelInstanceUnloadGuard), ovms::StatusCode::OK);
+    ASSERT_EQ(ovms::infer(*modelInstance, &request, &response, modelInstanceUnloadGuard), ovms::StatusCode::OK);
     assertStringResponse(response, {"String_123", "", "zebra"}, "copy:0_string");
 }
 
@@ -745,13 +812,13 @@ TYPED_TEST(TestPredict, SuccesfullReloadWhen1InferenceInProgress) {
         [this, &requestBs1, &releaseWaitBeforePerformInferenceBs1, &thread1Started]() {
             thread1Started.set_value();
             this->performPredict(this->config.getName(), this->config.getVersion(), requestBs1, nullptr,
-                std::move(std::make_unique<std::future<void>>(releaseWaitBeforePerformInferenceBs1.get_future())));
+                std::make_unique<std::future<void>>(releaseWaitBeforePerformInferenceBs1.get_future()));
         });
     std::thread t2(
         [this, &requestBs2, &releaseWaitBeforeGetModelInstanceBs2, &thread2Started]() {
             thread2Started.set_value();
             this->performPredict(this->config.getName(), this->config.getVersion(), requestBs2,
-                std::move(std::make_unique<std::future<void>>(releaseWaitBeforeGetModelInstanceBs2.get_future())),
+                std::make_unique<std::future<void>>(releaseWaitBeforeGetModelInstanceBs2.get_future()),
                 nullptr);
         });
     thread1Started.get_future().get();
@@ -785,14 +852,14 @@ TYPED_TEST(TestPredict, SuccesfullReloadWhen1InferenceAboutToStart) {
         [this, &requestBs1, &releaseWaitBeforeGetModelInstanceBs1, &thread1Started]() {
             thread1Started.set_value();
             this->performPredict(this->config.getName(), this->config.getVersion(), requestBs1,
-                std::move(std::make_unique<std::future<void>>(releaseWaitBeforeGetModelInstanceBs1.get_future())),
+                std::make_unique<std::future<void>>(releaseWaitBeforeGetModelInstanceBs1.get_future()),
                 nullptr);
         });
     std::thread t2(
         [this, &requestBs2, &releaseWaitBeforePerformInferenceBs2, &thread2Started]() {
             thread2Started.set_value();
             this->performPredict(this->config.getName(), this->config.getVersion(), requestBs2, nullptr,
-                std::move(std::make_unique<std::future<void>>(releaseWaitBeforePerformInferenceBs2.get_future())));
+                std::make_unique<std::future<void>>(releaseWaitBeforePerformInferenceBs2.get_future()));
         });
     thread1Started.get_future().get();
     thread2Started.get_future().get();
@@ -807,8 +874,8 @@ TYPED_TEST(TestPredict, SuccesfullReloadWhenSeveralInferRequestJustBeforeGetting
     const int initialBatchSize = 1;
     this->config.setBatchingParams("auto");
 
-    const uint waitingBeforePerformInferenceCount = 0;
-    const uint waitingBeforeGettingModelCount = 9;
+    const uint32_t waitingBeforePerformInferenceCount = 0;
+    const uint32_t waitingBeforeGettingModelCount = 9;
     this->testConcurrentPredicts(initialBatchSize, waitingBeforePerformInferenceCount, waitingBeforeGettingModelCount);
 }
 
@@ -816,8 +883,8 @@ TYPED_TEST(TestPredict, SuccesfullReloadWhenSeveralInferRequestJustBeforeInferen
     const int initialBatchSize = 1;
     this->config.setBatchingParams("auto");
 
-    const uint waitingBeforePerformInferenceCount = 9;
-    const uint waitingBeforeGettingModelCount = 0;
+    const uint32_t waitingBeforePerformInferenceCount = 9;
+    const uint32_t waitingBeforeGettingModelCount = 0;
     this->testConcurrentPredicts(initialBatchSize, waitingBeforePerformInferenceCount, waitingBeforeGettingModelCount);
 }
 
@@ -825,8 +892,8 @@ TYPED_TEST(TestPredict, SuccesfullReloadWhenSeveralInferRequestAtDifferentStages
     const int initialBatchSize = 1;
     this->config.setBatchingParams("auto");
 
-    const uint waitingBeforePerformInferenceCount = 9;
-    const uint waitingBeforeGettingModelCount = 9;
+    const uint32_t waitingBeforePerformInferenceCount = 9;
+    const uint32_t waitingBeforeGettingModelCount = 9;
     this->testConcurrentPredicts(initialBatchSize, waitingBeforePerformInferenceCount, waitingBeforeGettingModelCount);
 }
 
@@ -834,7 +901,7 @@ TYPED_TEST(TestPredict, SuccesfullReloadForMultipleThreadsDifferentBS) {
     const int initialBatchSize = 2;
     this->config.setBatchingParams("auto");
 
-    const uint numberOfThreads = 5;
+    const uint32_t numberOfThreads = 5;
     this->testConcurrentBsChanges(initialBatchSize, numberOfThreads);
 }
 TYPED_TEST(TestPredict, SuccesfullReshapeViaRequestOnDummyModel) {
@@ -870,7 +937,7 @@ TYPED_TEST(TestPredict, SuccesfullInferenceOnModelWithScalar) {
     typename TypeParam::first_type request;
     preparer.preparePredictRequest(request,
         {{SCALAR_MODEL_INPUT_NAME,
-            std::tuple<ovms::signed_shape_t, ovms::Precision>{{}, ovms::Precision::FP32}}});
+            std::tuple<ovms::signed_shape_t, ovms::Precision>{std::vector<int64_t>{}, ovms::Precision::FP32}}});
 
     typename TypeParam::second_type response;
 
@@ -1062,7 +1129,7 @@ TYPED_TEST(TestPredict, ReshapeViaRequestAndConfigChange) {
     // Cannot do the inference with (1,12)
     ASSERT_EQ(this->performInferenceWithShape(response, {1, 12}), ovms::StatusCode::INVALID_SHAPE);
 
-    // Successfull inference with (1,11)
+    // Successful inference with (1,11)
     ASSERT_EQ(this->performInferenceWithShape(response, {1, 11}), ovms::StatusCode::OK);
     this->checkOutputShape(response, {1, 11});
 
@@ -1106,7 +1173,7 @@ TYPED_TEST(TestPredict, ChangeBatchSizeViaRequestAndConfigChange) {
     // Cannot do the inference with (3,10)
     ASSERT_EQ(this->performInferenceWithBatchSize(response, 3), ovms::StatusCode::INVALID_BATCH_SIZE);
 
-    // Successfull inference with (4,10)
+    // Successful inference with (4,10)
     ASSERT_EQ(this->performInferenceWithBatchSize(response, 4), ovms::StatusCode::OK);
     this->checkOutputShape(response, {4, 10});
 
@@ -1419,10 +1486,10 @@ TYPED_TEST(TestPredict, PerformInferenceWithBinaryInputChangeModelInputLayout) {
     this->checkOutputValues(response, {37.0, 37.0, 28.0, 28.0, 238.0, 238.0}, INCREMENT_1x3x4x5_MODEL_OUTPUT_NAME);
 }
 
-/* Scenario - perform inference with binary input with witdth exceeding shape range when model shape is dynamic. Check results.
+/* Scenario - perform inference with binary input with width exceeding shape range when model shape is dynamic. Check results.
  *
  * 1. Load model with dynamic shape and input layout=nhwc, initial internal layout: nchw
- * 2. Do the inference with single binary image tensor with witdth exceeding shape range - expect status OK and reshaped output tensor
+ * 2. Do the inference with single binary image tensor with width exceeding shape range - expect status OK and reshaped output tensor
  */
 TYPED_TEST(TestPredict, PerformInferenceWithBinaryInputAndShapeDynamic) {
     if (typeid(typename TypeParam::first_type) == typeid(ovms::InferenceRequest))
@@ -1448,7 +1515,7 @@ TYPED_TEST(TestPredict, PerformInferenceWithBinaryInputAndShapeDynamic) {
 /* Scenario - perform inference with binary input of batch 0 when model shape is dynamic. Check results.
  *
  * 1. Load model with dynamic shape and input layout=nhwc, initial internal layout: nchw
- * 2. Do the inference with 0 binary image tensors with witdth exceeding shape range - expect status OK and reshaped output tensor
+ * 2. Do the inference with 0 binary image tensors with width exceeding shape range - expect status OK and reshaped output tensor
  */
 TYPED_TEST(TestPredict, PerformInferenceWithZeroBinaryInputsAndShapeDynamic) {
     if (typeid(typename TypeParam::first_type) == typeid(ovms::InferenceRequest))
@@ -1557,7 +1624,7 @@ TYPED_TEST(TestPredict, ChangeBatchSizeViaRequestAndConfigChangeArbitraryPositio
     // Cannot do the inference with (1,30)
     ASSERT_EQ(this->performInferenceWithBatchSize(response, 30, ovms::Precision::FP32, batchSizePosition), ovms::StatusCode::INVALID_BATCH_SIZE);
 
-    // Successfull inference with (1,4)
+    // Successful inference with (1,4)
     ASSERT_EQ(this->performInferenceWithBatchSize(response, 4, ovms::Precision::FP32, batchSizePosition), ovms::StatusCode::OK);
     this->checkOutputShape(response, {1, 4});
 
@@ -1615,7 +1682,7 @@ TYPED_TEST(TestPredict, PerformInferenceDummyBatchSizeAny) {
 
     typename TypeParam::second_type response;
 
-    for (size_t i : {1, 3, 5, 7, 11, 17, 21, 57, 99}) {
+    for (int32_t i : {1, 3, 5, 7, 11, 17, 21, 57, 99}) {
         ASSERT_EQ(this->performInferenceWithShape(response, {i, 10}), ovms::StatusCode::OK);
         this->checkOutputShape(response, {i, 10}, DUMMY_MODEL_OUTPUT_NAME);
     }
@@ -1843,7 +1910,7 @@ TYPED_TEST(TestPredict, InferenceWithNegativeShape) {
     std::unique_ptr<ovms::ModelInstanceUnloadGuard> modelInstanceUnloadGuard;
     ASSERT_EQ(this->manager.getModelInstance(config.getName(), config.getVersion(), modelInstance, modelInstanceUnloadGuard), ovms::StatusCode::OK);
     typename TypeParam::second_type response;
-    ASSERT_NE(modelInstance->infer(&request, &response, modelInstanceUnloadGuard), ovms::StatusCode::OK);
+    ASSERT_NE(ovms::infer(*modelInstance, &request, &response, modelInstanceUnloadGuard), ovms::StatusCode::OK);
 }
 
 TYPED_TEST(TestPredict, InferenceWithNegativeShapeDynamicParameter) {
@@ -1862,7 +1929,7 @@ TYPED_TEST(TestPredict, InferenceWithNegativeShapeDynamicParameter) {
     std::unique_ptr<ovms::ModelInstanceUnloadGuard> modelInstanceUnloadGuard;
     ASSERT_EQ(this->manager.getModelInstance(config.getName(), config.getVersion(), modelInstance, modelInstanceUnloadGuard), ovms::StatusCode::OK);
     typename TypeParam::second_type response;
-    ASSERT_NE(modelInstance->infer(&request, &response, modelInstanceUnloadGuard), ovms::StatusCode::OK);
+    ASSERT_NE(ovms::infer(*modelInstance, &request, &response, modelInstanceUnloadGuard), ovms::StatusCode::OK);
 }
 
 TYPED_TEST(TestPredict, InferenceWithStringInputs_positive_2D) {
@@ -1878,7 +1945,7 @@ TYPED_TEST(TestPredict, InferenceWithStringInputs_positive_2D) {
     std::unique_ptr<ovms::ModelInstanceUnloadGuard> modelInstanceUnloadGuard;
     ASSERT_EQ(this->manager.getModelInstance(config.getName(), config.getVersion(), modelInstance, modelInstanceUnloadGuard), ovms::StatusCode::OK);
     typename TypeParam::second_type response;
-    ASSERT_EQ(modelInstance->infer(&request, &response, modelInstanceUnloadGuard), ovms::StatusCode::OK);
+    ASSERT_EQ(ovms::infer(*modelInstance, &request, &response, modelInstanceUnloadGuard), ovms::StatusCode::OK);
     this->checkOutputShape(response, {2, 11}, PASSTHROUGH_MODEL_OUTPUT_NAME);
     std::vector<uint8_t> expectedData = {
         'S', 't', 'r', 'i', 'n', 'g', '_', '1', '2', '3', 0,
@@ -1900,7 +1967,7 @@ TYPED_TEST(TestPredict, InferenceWithStringInputs_positive_batch0_2D) {
     std::unique_ptr<ovms::ModelInstanceUnloadGuard> modelInstanceUnloadGuard;
     ASSERT_EQ(this->manager.getModelInstance(config.getName(), config.getVersion(), modelInstance, modelInstanceUnloadGuard), ovms::StatusCode::OK);
     typename TypeParam::second_type response;
-    auto status = modelInstance->infer(&request, &response, modelInstanceUnloadGuard);
+    auto status = ovms::infer(*modelInstance, &request, &response, modelInstanceUnloadGuard);
     ASSERT_EQ(status, ovms::StatusCode::INVALID_BATCH_SIZE) << status.string();
 }
 
@@ -1917,7 +1984,7 @@ TYPED_TEST(TestPredict, InferenceWithStringInputs_positive_2D_data_in_buffer) {
     std::unique_ptr<ovms::ModelInstanceUnloadGuard> modelInstanceUnloadGuard;
     ASSERT_EQ(this->manager.getModelInstance(config.getName(), config.getVersion(), modelInstance, modelInstanceUnloadGuard), ovms::StatusCode::OK);
     typename TypeParam::second_type response;
-    ASSERT_EQ(modelInstance->infer(&request, &response, modelInstanceUnloadGuard), ovms::StatusCode::OK);
+    ASSERT_EQ(ovms::infer(*modelInstance, &request, &response, modelInstanceUnloadGuard), ovms::StatusCode::OK);
     this->checkOutputShape(response, {2, 11}, PASSTHROUGH_MODEL_OUTPUT_NAME);
     std::vector<uint8_t> expectedData = {
         'S', 't', 'r', 'i', 'n', 'g', '_', '1', '2', '3', 0,
@@ -1926,6 +1993,7 @@ TYPED_TEST(TestPredict, InferenceWithStringInputs_positive_2D_data_in_buffer) {
     this->checkOutputValuesU8(response, expectedData, PASSTHROUGH_MODEL_OUTPUT_NAME, checkRaw);
 }
 
+// Legacy, supported via Native OV String since 2024.0
 TYPED_TEST(TestPredict, InferenceWithStringInputs_positive_1D) {
     if (typeid(typename TypeParam::first_type) == typeid(ovms::InferenceRequest))
         GTEST_SKIP() << "String inputs not supported for C-API";
@@ -1940,22 +2008,29 @@ TYPED_TEST(TestPredict, InferenceWithStringInputs_positive_1D) {
     std::unique_ptr<ovms::ModelInstanceUnloadGuard> modelInstanceUnloadGuard;
     ASSERT_EQ(this->manager.getModelInstance(config.getName(), config.getVersion(), modelInstance, modelInstanceUnloadGuard), ovms::StatusCode::OK);
     typename TypeParam::second_type response;
-    ASSERT_EQ(modelInstance->infer(&request, &response, modelInstanceUnloadGuard), ovms::StatusCode::OK);
-    this->checkOutputShape(response, {1, 33}, PASSTHROUGH_MODEL_OUTPUT_NAME);
-    std::vector<uint8_t> expectedData = {
-        4, 0, 0, 0,  // batch size
-        0, 0, 0, 0,  // first string start offset
-        3, 0, 0, 0,  // end of "ala" in condensed content
-        3, 0, 0, 0,  // end of "" in condensed content
-        5, 0, 0, 0,  // end of "ma" in condensed content
-        9, 0, 0, 0,  // end of "kota" in condensed content
-        'a', 'l', 'a',
-        'm', 'a',
-        'k', 'o', 't', 'a'};
-    bool checkRaw = true;
-    this->checkOutputValuesU8(response, expectedData, PASSTHROUGH_MODEL_OUTPUT_NAME, checkRaw);
+    ASSERT_EQ(ovms::infer(*modelInstance, &request, &response, modelInstanceUnloadGuard), ovms::StatusCode::NOT_IMPLEMENTED);
 }
 
+TYPED_TEST(TestPredict, InferenceWithStringInputs_positive_NativeString) {
+    if (typeid(typename TypeParam::first_type) == typeid(ovms::InferenceRequest))
+        GTEST_SKIP() << "String inputs not supported for C-API";
+    typename TypeParam::first_type request;
+    std::vector<std::string> inputStrings = {"ala", "", "ma", "kota"};
+    bool putBufferInInputTensorContent = true;
+    prepareInferStringRequest(request, PASSTHROUGH_STRING_MODEL_INPUT_NAME, inputStrings, putBufferInInputTensorContent);
+    ovms::ModelConfig config = NATIVE_STRING_MODEL_CONFIG;
+    config.setBatchingParams("");
+    ASSERT_EQ(this->manager.reloadModelWithVersions(config), ovms::StatusCode::OK_RELOADED);
+    std::shared_ptr<ovms::ModelInstance> modelInstance;
+    std::unique_ptr<ovms::ModelInstanceUnloadGuard> modelInstanceUnloadGuard;
+    ASSERT_EQ(this->manager.getModelInstance(config.getName(), config.getVersion(), modelInstance, modelInstanceUnloadGuard), ovms::StatusCode::OK);
+    typename TypeParam::second_type response;
+    ASSERT_EQ(ovms::infer(*modelInstance, &request, &response, modelInstanceUnloadGuard), ovms::StatusCode::OK);
+    bool checkRaw = true;
+    this->checkOutputValuesString(response, inputStrings, PASSTHROUGH_STRING_MODEL_OUTPUT_NAME, checkRaw);
+}
+
+// Legacy, supported via Native OV String since 2024.0
 TYPED_TEST(TestPredict, InferenceWithStringInputs_positive_batch0_1D) {
     if (typeid(typename TypeParam::first_type) == typeid(ovms::InferenceRequest))
         GTEST_SKIP() << "String inputs not supported for C-API";
@@ -1970,15 +2045,28 @@ TYPED_TEST(TestPredict, InferenceWithStringInputs_positive_batch0_1D) {
     std::unique_ptr<ovms::ModelInstanceUnloadGuard> modelInstanceUnloadGuard;
     ASSERT_EQ(this->manager.getModelInstance(config.getName(), config.getVersion(), modelInstance, modelInstanceUnloadGuard), ovms::StatusCode::OK);
     typename TypeParam::second_type response;
-    ASSERT_EQ(modelInstance->infer(&request, &response, modelInstanceUnloadGuard), ovms::StatusCode::OK);
-    this->checkOutputShape(response, {1, 8}, PASSTHROUGH_MODEL_OUTPUT_NAME);
-    std::vector<uint8_t> expectedData = {
-        0, 0, 0, 0,
-        0, 0, 0, 0};
-    bool checkRaw = true;
-    this->checkOutputValuesU8(response, expectedData, PASSTHROUGH_MODEL_OUTPUT_NAME, checkRaw);
+    ASSERT_EQ(ovms::infer(*modelInstance, &request, &response, modelInstanceUnloadGuard), ovms::StatusCode::NOT_IMPLEMENTED);
 }
 
+TYPED_TEST(TestPredict, InferenceWithStringInputs_positive_batch0_NativeString) {
+    if (typeid(typename TypeParam::first_type) == typeid(ovms::InferenceRequest))
+        GTEST_SKIP() << "String inputs not supported for C-API";
+    typename TypeParam::first_type request;
+    std::vector<std::string> inputStrings = {};
+    prepareInferStringRequest(request, PASSTHROUGH_STRING_MODEL_INPUT_NAME, inputStrings);
+    ovms::ModelConfig config = NATIVE_STRING_MODEL_CONFIG;
+    config.setBatchingParams("");
+    ASSERT_EQ(this->manager.reloadModelWithVersions(config), ovms::StatusCode::OK_RELOADED);
+    std::shared_ptr<ovms::ModelInstance> modelInstance;
+    std::unique_ptr<ovms::ModelInstanceUnloadGuard> modelInstanceUnloadGuard;
+    ASSERT_EQ(this->manager.getModelInstance(config.getName(), config.getVersion(), modelInstance, modelInstanceUnloadGuard), ovms::StatusCode::OK);
+    typename TypeParam::second_type response;
+    ASSERT_EQ(ovms::infer(*modelInstance, &request, &response, modelInstanceUnloadGuard), ovms::StatusCode::OK);
+    bool checkRaw = true;
+    this->checkOutputValuesString(response, inputStrings, PASSTHROUGH_STRING_MODEL_OUTPUT_NAME, checkRaw);
+}
+
+// Legacy, supported via Native OV String since 2024.0
 TYPED_TEST(TestPredict, InferenceWithStringInputs_positive_1D_data_in_buffer) {
     if (typeid(typename TypeParam::first_type) == typeid(ovms::InferenceRequest) || typeid(typename TypeParam::first_type) == typeid(TFSRequestType))
         GTEST_SKIP() << "String inputs in buffer not supported for C-API and TFS api";
@@ -1993,20 +2081,26 @@ TYPED_TEST(TestPredict, InferenceWithStringInputs_positive_1D_data_in_buffer) {
     std::unique_ptr<ovms::ModelInstanceUnloadGuard> modelInstanceUnloadGuard;
     ASSERT_EQ(this->manager.getModelInstance(config.getName(), config.getVersion(), modelInstance, modelInstanceUnloadGuard), ovms::StatusCode::OK);
     typename TypeParam::second_type response;
-    ASSERT_EQ(modelInstance->infer(&request, &response, modelInstanceUnloadGuard), ovms::StatusCode::OK);
-    this->checkOutputShape(response, {1, 33}, PASSTHROUGH_MODEL_OUTPUT_NAME);
-    std::vector<uint8_t> expectedData = {
-        4, 0, 0, 0,  // batch size
-        0, 0, 0, 0,  // first string start offset
-        3, 0, 0, 0,  // end of "ala" in condensed content
-        3, 0, 0, 0,  // end of "" in condensed content
-        5, 0, 0, 0,  // end of "ma" in condensed content
-        9, 0, 0, 0,  // end of "kota" in condensed content
-        'a', 'l', 'a',
-        'm', 'a',
-        'k', 'o', 't', 'a'};
+    ASSERT_EQ(ovms::infer(*modelInstance, &request, &response, modelInstanceUnloadGuard), ovms::StatusCode::NOT_IMPLEMENTED);
+}
+
+TYPED_TEST(TestPredict, InferenceWithStringInputs_positive_NativeString_data_in_buffer) {
+    if (typeid(typename TypeParam::first_type) == typeid(ovms::InferenceRequest) || typeid(typename TypeParam::first_type) == typeid(TFSRequestType))
+        GTEST_SKIP() << "String inputs in buffer not supported for C-API and TFS api";
+    typename TypeParam::first_type request;
+    std::vector<std::string> inputStrings = {"ala", "", "ma", "kota"};
+    bool putBufferInInputTensorContent = false;
+    prepareInferStringRequest(request, PASSTHROUGH_STRING_MODEL_INPUT_NAME, inputStrings, putBufferInInputTensorContent);
+    ovms::ModelConfig config = NATIVE_STRING_MODEL_CONFIG;
+    config.setBatchingParams("");
+    ASSERT_EQ(this->manager.reloadModelWithVersions(config), ovms::StatusCode::OK_RELOADED);
+    std::shared_ptr<ovms::ModelInstance> modelInstance;
+    std::unique_ptr<ovms::ModelInstanceUnloadGuard> modelInstanceUnloadGuard;
+    ASSERT_EQ(this->manager.getModelInstance(config.getName(), config.getVersion(), modelInstance, modelInstanceUnloadGuard), ovms::StatusCode::OK);
+    typename TypeParam::second_type response;
+    ASSERT_EQ(ovms::infer(*modelInstance, &request, &response, modelInstanceUnloadGuard), ovms::StatusCode::OK);
     bool checkRaw = true;
-    this->checkOutputValuesU8(response, expectedData, PASSTHROUGH_MODEL_OUTPUT_NAME, checkRaw);
+    this->checkOutputValuesString(response, inputStrings, PASSTHROUGH_STRING_MODEL_OUTPUT_NAME, checkRaw);
 }
 
 class TestPredictKFS : public TestPredict<KFSInterface> {};
@@ -2027,7 +2121,7 @@ TEST_F(TestPredictKFS, RequestDataInFp32ContentResponseInRaw) {
     std::unique_ptr<ovms::ModelInstanceUnloadGuard> modelInstanceUnloadGuard;
     ASSERT_EQ(this->manager.getModelInstance(config.getName(), config.getVersion(), modelInstance, modelInstanceUnloadGuard), ovms::StatusCode::OK);
     KFSResponse response;
-    ASSERT_EQ(modelInstance->infer(&request, &response, modelInstanceUnloadGuard), ovms::StatusCode::OK);
+    ASSERT_EQ(ovms::infer(*modelInstance, &request, &response, modelInstanceUnloadGuard), ovms::StatusCode::OK);
     ASSERT_EQ(response.outputs_size(), 1);
     ASSERT_FALSE(response.outputs(0).has_contents());
     ASSERT_GT(response.raw_output_contents_size(), 0);
@@ -2049,7 +2143,7 @@ TEST_F(TestPredictKFS, RequestDataInRawResponseInRaw) {
     std::unique_ptr<ovms::ModelInstanceUnloadGuard> modelInstanceUnloadGuard;
     ASSERT_EQ(this->manager.getModelInstance(config.getName(), config.getVersion(), modelInstance, modelInstanceUnloadGuard), ovms::StatusCode::OK);
     KFSResponse response;
-    ASSERT_EQ(modelInstance->infer(&request, &response, modelInstanceUnloadGuard), ovms::StatusCode::OK);
+    ASSERT_EQ(ovms::infer(*modelInstance, &request, &response, modelInstanceUnloadGuard), ovms::StatusCode::OK);
     ASSERT_EQ(response.outputs_size(), 1);
     ASSERT_FALSE(response.outputs(0).has_contents());
     ASSERT_GT(response.raw_output_contents_size(), 0);

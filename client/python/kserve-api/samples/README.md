@@ -3,24 +3,24 @@
 OpenVINO Model Server 2022.2 release introduced support for [KServe API](https://github.com/kserve/kserve/tree/master/docs/predict-api/v2).
 
 This guide shows how to interact with KServe API endpoints on both gRPC and HTTP interfaces. It covers following topics:
-- <a href="#grpc-api">GRPC API Examples </a>
-  - <a href="#grpc-server-live">grpc_server_live.py</a>
-  - <a href="#grpc-server-ready">grpc_server_ready.py</a>
-  - <a href="#grpc-server-metadata">grpc_server_metadata.py</a>
-  - <a href="#grpc-model-ready">grpc_model_ready.py</a>
-  - <a href="#grpc-model-metadata">grpc_model_metadata.py</a>
-  - <a href="#grpc-model-infer">grpc_infer_resnet.py</a>
-  - <a href="#grpc-model-infer-binary">grpc_infer_binary_resnet.py</a>
-  - <a href="#grpc-model-async-infer">grpc_async_infer_resnet.py</a>
-- <a href="#http-api">HTTP API Example</a>
-  - <a href="#http-server-live">http_server_live.py</a>
-  - <a href="#http-server-ready">http_server_ready.py</a>
-  - <a href="#http-server-metadata">http_server_metadata.py</a>
-  - <a href="#http-model-ready">http_model_ready.py</a>
-  - <a href="#http-model-metadata">http_model_metadata.py</a>
-  - <a href="#http-model-infer">http_infer_resnet.py</a>
-  - <a href="#http-model-infer-binary">http_infer_binary_resnet.py</a>
-  - <a href="#http-model-async-infer">http_async_infer_resnet.py</a>
+- [GRPC API Examples](#grpc-examples)
+  - [grpc_server_live.py](#run-the-client-to-get-server-liveness)
+  - [grpc_server_ready.py](#run-the-client-to-get-server-readiness)
+  - [grpc_server_metadata.py](#run-the-client-to-get-server-metadata)
+  - [grpc_model_ready.py](#run-the-client-to-get-model-readiness)
+  - [grpc_model_metadata.py](#run-the-client-to-get-metadata)
+  - [grpc_infer_resnet.py](#run-the-client-to-perform-inference)
+  - [grpc_infer_binary_resnet.py](#run-the-client-to-perform-inference-with-binary-encoded-image)
+  - [grpc_async_infer_resnet.py](#run-the-client-to-perform-asynchronous-inference)
+- [HTTP API Example](#http-examples)
+  - [http_server_live.py](#run-the-client-to-get-server-liveness-1)
+  - [http_server_ready.py](#run-the-client-to-get-server-readiness-1)
+  - [http_server_metadata.py](#run-the-client-to-get-server-metadata-1)
+  - [http_model_ready.py](#run-the-client-to-get-model-readiness-1)
+  - [http_model_metadata.py](#run-the-client-to-get-model-metadata)
+  - [http_infer_resnet.py](#run-the-client-to-perform-inference-1)
+  - [http_infer_binary_resnet.py](#run-the-client-to-perform-inference-with-binary-encoded-image-1)
+  - [http_async_infer_resnet.py](#run-the-client-to-perform-asynchronous-inference-1)
 
 > **Note:** Some of the samples will use [ResNet50](https://github.com/openvinotoolkit/open_model_zoo/blob/2022.1.0/models/intel/resnet50-binary-0001/README.md).
 
@@ -58,20 +58,20 @@ Start the server container with the image pulled in the previous step and mount 
 docker run --rm -d -v $(pwd)/models:/models -p 9000:9000 -p 8000:8000 openvino/model_server:latest --model_name resnet --model_path /models/resnet --port 9000 --rest_port 8000 --layout NHWC:NCHW
 ```
 
-> Note: The model default setting is to accept inputs in layout NCHW, but we change it to NHWC to make it work with samples using either regular, array-like input data or JPEG encoded images. 
+> Note: The model default setting is to accept inputs in layout NCHW, but we change it to NHWC to make it work with samples using either regular, array-like input data or JPEG encoded images.
 
 Once you finish above steps, you are ready to run the samples.
 
 ---
 
-## GRPC Examples <a name="grpc-api"></a>
+## GRPC Examples
 
-### Run the Client to get server liveness <a name="grpc-server-live"></a>
+### Run the Client to get server liveness
 
 - Command
 
 ```Bash
-python3 ./grpc_server_live.py --help
+python ./grpc_server_live.py --help
 usage: grpc_server_live.py [-h] [--grpc_address GRPC_ADDRESS] [--grpc_port GRPC_PORT]
 
 Sends request via KServe gRPC API to check if server is alive.
@@ -85,19 +85,19 @@ optional arguments:
 
 ```
 
-- Usage Example 
+- Usage Example
 
 ```Bash
-python3 ./grpc_server_live.py --grpc_port 9000 --grpc_address localhost
+python ./grpc_server_live.py --grpc_port 9000 --grpc_address localhost
 Server Live: True
 ```
 
-### Run the Client to get server readiness <a name="grpc-server-ready"></a>
+### Run the Client to get server readiness
 
 - Command
 
 ```Bash
-python3 ./grpc_server_ready.py --help
+python ./grpc_server_ready.py --help
 usage: grpc_server_ready.py [-h] [--grpc_address GRPC_ADDRESS] [--grpc_port GRPC_PORT]
 
 Sends request via KServe gRPC API to check if server is ready.
@@ -114,16 +114,16 @@ optional arguments:
 - Usage Example
 
 ```Bash
-python3 ./grpc_server_ready.py --grpc_port 9000 --grpc_address localhost
+python ./grpc_server_ready.py --grpc_port 9000 --grpc_address localhost
 Server Ready: True
 ```
 
-### Run the Client to get server metadata <a name="grpc-server-metadata"></a>
+### Run the Client to get server metadata
 
 - Command
 
 ```Bash
-python3 ./grpc_server_metadata.py --help
+python ./grpc_server_metadata.py --help
 usage: grpc_server_metadata.py [-h] [--grpc_address GRPC_ADDRESS] [--grpc_port GRPC_PORT]
 
 Sends request via KServe gRPC API to get server metadata.
@@ -139,17 +139,17 @@ optional arguments:
 - Usage Example
 
 ```Bash
-python3 ./grpc_server_metadata.py --grpc_port 9000 --grpc_address localhost
+python ./grpc_server_metadata.py --grpc_port 9000 --grpc_address localhost
 name: "OpenVINO Model Server"
 version: "2022.2.c290da85"
 ```
 
-### Run the Client to get model readiness <a name="grpc-model-ready"></a>
+### Run the Client to get model readiness
 
 - Command
 
 ```Bash
-python3 ./grpc_model_ready.py --help
+python ./grpc_model_ready.py --help
 usage: grpc_model_ready.py [-h] [--grpc_address GRPC_ADDRESS] [--grpc_port GRPC_PORT] [--model_name MODEL_NAME] [--model_version MODEL_VERSION]
 
 Sends requests via KServe gRPC API to check if model is ready for inference.
@@ -169,16 +169,16 @@ optional arguments:
 - Usage Example
 
 ```Bash
-python3 ./grpc_model_ready.py --grpc_port 9000 --grpc_address localhost --model_name resnet
+python ./grpc_model_ready.py --grpc_port 9000 --grpc_address localhost --model_name resnet
 Model Ready: True
 ```
 
-### Run the Client to get metadata <a name="grpc-model-metadata"></a>
+### Run the Client to get metadata
 
 - Command
 
 ```Bash
-python3 ./grpc_model_metadata.py --help
+python ./grpc_model_metadata.py --help
 usage: grpc_model_metadata.py [-h] [--grpc_address GRPC_ADDRESS] [--grpc_port GRPC_PORT] [--model_name MODEL_NAME] [--model_version MODEL_VERSION]
 
 Sends requests via KServe gRPC API to get model metadata
@@ -198,7 +198,7 @@ optional arguments:
 - Usage Example
 
 ```Bash
-python3 ./grpc_model_metadata.py --grpc_port 9000 --grpc_address localhost --model_name resnet
+python ./grpc_model_metadata.py --grpc_port 9000 --grpc_address localhost --model_name resnet
 model metadata:
 name: "resnet"
 versions: "1"
@@ -219,12 +219,12 @@ outputs {
 }
 ```
 
-### Run the Client to perform inference <a name="grpc-model-infer"></a>
+### Run the Client to perform inference
 
 - Command
 
 ```Bash
-python3 grpc_infer_resnet.py --help
+python grpc_infer_resnet.py --help
 usage: grpc_infer_resnet.py [-h] --images_numpy_path IMAGES_NUMPY_PATH [--labels_numpy_path LABELS_NUMPY_PATH] [--grpc_address GRPC_ADDRESS]
                             [--grpc_port GRPC_PORT] [--input_name INPUT_NAME] [--output_name OUTPUT_NAME] [--transpose_input {False,True}]
                             [--transpose_method {nchw2nhwc,nhwc2nchw}] [--iterations ITERATIONS] [--batchsize BATCHSIZE] [--model_name MODEL_NAME]
@@ -272,7 +272,7 @@ optional arguments:
 - Usage Example
 
 ```Bash
-python3 grpc_infer_resnet.py --grpc_port 9000 --images_numpy_path ../../imgs_nhwc.npy --labels_numpy_path ../../lbs.npy --input_name 0 --output_name 1463 --model_name resnet --transpose_input False
+python grpc_infer_resnet.py --grpc_port 9000 --images_numpy_path ../../imgs_nhwc.npy --labels_numpy_path ../../lbs.npy --input_name 0 --output_name 1463 --model_name resnet --transpose_input False
 Image data range: 0.0 : 255.0
 Start processing:
         Model name: resnet
@@ -324,11 +324,11 @@ Classification accuracy: 100.00
 ```
 
 
-### Run the Client to perform inference with binary encoded image <a name="grpc-model-infer-binary"></a>
+### Run the Client to perform inference with binary encoded image
 - Command
 
 ```Bash
-python3 grpc_infer_binary_resnet.py --help
+python grpc_infer_binary_resnet.py --help
 usage: grpc_infer_binary_resnet.py [-h] [--images_list IMAGES_LIST] [--grpc_address GRPC_ADDRESS] [--grpc_port GRPC_PORT] [--input_name INPUT_NAME] [--output_name OUTPUT_NAME] [--batchsize BATCHSIZE]
                                    [--model_name MODEL_NAME] [--pipeline_name PIPELINE_NAME] [--tls]
 
@@ -358,7 +358,7 @@ optional arguments:
 - Usage Example
 
 ```Bash
-python3 grpc_infer_binary_resnet.py --grpc_port 9000 --images_list ../../resnet_input_images.txt --input_name 0 --output_name 1463 --model_name resnet
+python grpc_infer_binary_resnet.py --grpc_port 9000 --images_list ../../resnet_input_images.txt --input_name 0 --output_name 1463 --model_name resnet
 Start processing:
         Model name: resnet
 Iteration 0; Processing time: 27.09 ms; speed 36.92 fps
@@ -405,12 +405,12 @@ Classification accuracy: 100.00
 ```
 
 
-### Run the Client to perform asynchronous inference <a name="grpc-model-async-infer"></a>
+### Run the Client to perform asynchronous inference
 
 - Command
 
 ```Bash
-python3 grpc_async_infer_resnet.py --help
+python grpc_async_infer_resnet.py --help
 usage: grpc_async_infer_resnet.py [-h] --images_numpy_path IMAGES_NUMPY_PATH [--labels_numpy_path LABELS_NUMPY_PATH] [--grpc_address GRPC_ADDRESS] [--grpc_port GRPC_PORT] [--input_name INPUT_NAME]
                                   [--output_name OUTPUT_NAME] [--transpose_input {False,True}] [--transpose_method {nchw2nhwc,nhwc2nchw}] [--iterations ITERATIONS] [--batchsize BATCHSIZE] [--model_name MODEL_NAME]
                                   [--pipeline_name PIPELINE_NAME] [--dag-batch-size-auto] [--tls] [--server_cert SERVER_CERT] [--client_cert CLIENT_CERT] [--client_key CLIENT_KEY] [--timeout TIMEOUT]
@@ -458,7 +458,7 @@ optional arguments:
 - Usage Example
 
 ```Bash
-python3 grpc_async_infer_resnet.py --grpc_port 9000 --images_numpy_path ../../imgs_nhwc.npy --labels_numpy_path ../../lbs.npy --input_name 0 --output_name 1463 --transpose_input False --model_name resnet
+python grpc_async_infer_resnet.py --grpc_port 9000 --images_numpy_path ../../imgs_nhwc.npy --labels_numpy_path ../../lbs.npy --input_name 0 --output_name 1463 --transpose_input False --model_name resnet
 Image data range: 0.0 : 255.0
 Start processing:
         Model name: resnet
@@ -491,14 +491,14 @@ Classification accuracy: 100.00
 
 ---
 
-## HTTP Examples <a name="http-api"></a>
+## HTTP Examples
 
-### Run the Client to get server liveness <a name="http-server-live"></a>
+### Run the Client to get server liveness
 
 - Command
 
 ```Bash
-python3 ./http_server_live.py --help
+python ./http_server_live.py --help
 usage: http_server_live.py [-h] [--http_address HTTP_ADDRESS] [--http_port HTTP_PORT]
 
 Sends request via KServe HTTP API to check if server is alive.
@@ -514,16 +514,16 @@ optional arguments:
 - Usage Example
 
 ```Bash
-python3 ./http_server_live.py --http_port 8000 --http_address localhost
+python ./http_server_live.py --http_port 8000 --http_address localhost
 Server Live: True
 ```
 
-### Run the Client to get server readiness <a name="http-server-ready"></a>
+### Run the Client to get server readiness
 
 - Command
 
 ```Bash
-python3 ./http_server_ready.py --help
+python ./http_server_ready.py --help
 usage: http_server_ready.py [-h] [--http_address HTTP_ADDRESS] [--http_port HTTP_PORT]
 
 Sends request via KServe HTTP API to check if server is ready.
@@ -540,16 +540,16 @@ optional arguments:
 - Usage Example
 
 ```Bash
-python3 ./http_server_ready.py --http_port 8000 --http_address localhost
+python ./http_server_ready.py --http_port 8000 --http_address localhost
 Server Ready: True
 ```
 
-### Run the Client to get server metadata <a name="http-server-metadata"></a>
+### Run the Client to get server metadata
 
 - Command
 
 ```Bash
-python3 ./http_server_metadata.py --help
+python ./http_server_metadata.py --help
 usage: http_server_metadata.py [-h] [--http_address HTTP_ADDRESS] [--http_port HTTP_PORT]
 
 Sends request via KServe HTTP API to get server metadata.
@@ -565,16 +565,16 @@ optional arguments:
 - Usage Example
 
 ```Bash
-python3 ./http_server_metadata.py --http_port 8000 --http_address localhost
+python ./http_server_metadata.py --http_port 8000 --http_address localhost
 {'name': 'OpenVINO Model Server', 'version': '2022.2.c290da85'}
 ```
 
-### Run the Client to get model readiness <a name="http-model-ready"></a>
+### Run the Client to get model readiness
 
 - Command
 
 ```Bash
-python3 ./http_model_ready.py --help
+python ./http_model_ready.py --help
 usage: http_model_ready.py [-h] [--http_address HTTP_ADDRESS] [--http_port HTTP_PORT] [--model_name MODEL_NAME] [--model_version MODEL_VERSION]
 
 Sends request via KServe HTTP API to check if model is ready.
@@ -594,16 +594,16 @@ optional arguments:
 - Usage Example
 
 ```Bash
-python3 ./http_model_ready.py --http_port 8000 --http_address localhost --model_name resnet
+python ./http_model_ready.py --http_port 8000 --http_address localhost --model_name resnet
 Model Ready: True
 ```
 
-### Run the Client to get model metadata <a name="http-model-metadata"></a>
+### Run the Client to get model metadata
 
 - Command
 
 ```Bash
-python3 ./http_model_metadata.py --help
+python ./http_model_metadata.py --help
 usage: http_model_metadata.py [-h] [--http_address HTTP_ADDRESS] [--http_port HTTP_PORT] [--model_name MODEL_NAME] [--model_version MODEL_VERSION]
 
 Sends request via KServe HTTP API to get model metadata.
@@ -623,16 +623,16 @@ optional arguments:
 - Usage Example
 
 ```Bash
-python3 ./http_model_metadata.py --http_port 8000 --http_address localhost --model_name resnet
+python ./http_model_metadata.py --http_port 8000 --http_address localhost --model_name resnet
 {'name': 'resnet', 'versions': ['1'], 'platform': 'OpenVINO', 'inputs': [{'name': '0', 'datatype': 'FP32', 'shape': [1, 224, 224, 3]}], 'outputs': [{'name': '1463', 'datatype': 'FP32', 'shape': [1, 1000]}]}
 ```
 
-### Run the Client to perform inference <a name="http-model-infer"></a>
+### Run the Client to perform inference
 
 - Command
 
 ```Bash
-python3 ./http_infer_resnet.py --help
+python ./http_infer_resnet.py --help
 usage: http_infer_resnet.py [-h] --images_numpy_path IMAGES_NUMPY_PATH [--labels_numpy_path LABELS_NUMPY_PATH] [--http_address HTTP_ADDRESS]
                             [--http_port HTTP_PORT] [--input_name INPUT_NAME] [--output_name OUTPUT_NAME] [--transpose_input {False,True}]
                             [--transpose_method {nchw2nhwc,nhwc2nchw}] [--iterations ITERATIONS] [--batchsize BATCHSIZE] [--model_name MODEL_NAME]
@@ -681,7 +681,7 @@ optional arguments:
 - Usage Example #1 - Input data placed in JSON object.
 
 ```Bash
-python3 ./http_infer_resnet.py --http_port 8000 --images_numpy_path ../../imgs_nhwc.npy --labels_numpy_path ../../lbs.npy --input_name 0 --output_name 1463 --model_name resnet --transpose_input False
+python ./http_infer_resnet.py --http_port 8000 --images_numpy_path ../../imgs_nhwc.npy --labels_numpy_path ../../lbs.npy --input_name 0 --output_name 1463 --model_name resnet --transpose_input False
 Image data range: 0.0 : 255.0
 Start processing:
         Model name: resnet
@@ -735,7 +735,7 @@ Classification accuracy: 100.00
 - Usage Example #2 - Input data placed as binary, outside JSON object.
 
 ```Bash
-python3 ./http_infer_resnet.py --http_port 8000 --images_numpy_path ../../imgs_nhwc.npy --labels_numpy_path ../../lbs.npy --input_name 0 --output_name 1463 --model_name resnet --transpose_input False --binary_data
+python ./http_infer_resnet.py --http_port 8000 --images_numpy_path ../../imgs_nhwc.npy --labels_numpy_path ../../lbs.npy --input_name 0 --output_name 1463 --model_name resnet --transpose_input False --binary_data
 Image data range: 0.0 : 255.0
 Start processing:
         Model name: resnet
@@ -787,11 +787,11 @@ Classification accuracy: 100.00
 ```
 
 
-### Run the Client to perform inference with binary encoded image <a name="http-model-infer-binary"></a>
+### Run the Client to perform inference with binary encoded image
 - Command
 
 ```Bash
-python3 ./http_infer_binary_resnet.py --help
+python ./http_infer_binary_resnet.py --help
 usage: http_infer_binary_resnet.py [-h] [--images_list IMAGES_LIST] [--http_address HTTP_ADDRESS] [--http_port HTTP_PORT] [--input_name INPUT_NAME] [--output_name OUTPUT_NAME] [--batchsize BATCHSIZE]
                                    [--model_name MODEL_NAME] [--pipeline_name PIPELINE_NAME] [--tls] [--server_cert SERVER_CERT] [--client_cert CLIENT_CERT] [--client_key CLIENT_KEY]
 
@@ -827,7 +827,7 @@ optional arguments:
 - Usage Example
 
 ```Bash
-python3 ./http_infer_binary_resnet.py --http_port 8000 --images_list ../../resnet_input_images.txt --input_name 0 --output_name 1463 --model_name resnet
+python ./http_infer_binary_resnet.py --http_port 8000 --images_list ../../resnet_input_images.txt --input_name 0 --output_name 1463 --model_name resnet
 Start processing:
         Model name: resnet
 Iteration 0; Processing time: 38.61 ms; speed 25.90 fps
@@ -873,12 +873,12 @@ time variance: 29.96
 Classification accuracy: 100.00
 ```
 
-### Run the Client to perform asynchronous inference <a name="http-model-async-infer"></a>
+### Run the Client to perform asynchronous inference
 
 - Command
 
 ```Bash
- python3 http_async_infer_resnet.py --help
+ python http_async_infer_resnet.py --help
 usage: http_async_infer_resnet.py [-h] --images_numpy_path IMAGES_NUMPY_PATH [--labels_numpy_path LABELS_NUMPY_PATH] [--http_address HTTP_ADDRESS] [--http_port HTTP_PORT] [--input_name INPUT_NAME]
                                   [--output_name OUTPUT_NAME] [--transpose_input {False,True}] [--transpose_method {nchw2nhwc,nhwc2nchw}] [--iterations ITERATIONS] [--batchsize BATCHSIZE] [--model_name MODEL_NAME]
                                   [--pipeline_name PIPELINE_NAME] [--dag-batch-size-auto] [--binary_data] [--tls] [--server_cert SERVER_CERT] [--client_cert CLIENT_CERT] [--client_key CLIENT_KEY]
@@ -926,7 +926,7 @@ optional arguments:
 - Usage Example
 
 ```Bash
-python3 http_async_infer_resnet.py --http_port 8000 --images_numpy_path ../../imgs_nhwc.npy --labels_numpy_path ../../lbs.npy --input_name 0 --output_name 1463 --transpose_input False --model_name resnet
+python http_async_infer_resnet.py --http_port 8000 --images_numpy_path ../../imgs_nhwc.npy --labels_numpy_path ../../lbs.npy --input_name 0 --output_name 1463 --transpose_input False --model_name resnet
 Image data range: 0.0 : 255.0
 Start processing:
         Model name: resnet

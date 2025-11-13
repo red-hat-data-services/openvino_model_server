@@ -16,10 +16,16 @@
 #pragma once
 
 #include <string>
-
+#pragma warning(push)
+#pragma warning(disable : 6313)
 #include <rapidjson/document.h>
+#pragma warning(pop)
 
 namespace ovms {
+
+extern const std::string DEFAULT_GRAPH_FILENAME;
+extern const std::string DEFAULT_SUBCONFIG_FILENAME;
+extern const std::string DEFAULT_MODELMESH_SUBCONFIG_FILENAME;
 
 class Status;
 
@@ -52,6 +58,11 @@ private:
      * @brief Json config path
      */
     std::string subconfigPath;
+
+    /**
+     * @brief Optional model mesh subconfig path
+     */
+    std::string modelMeshSubconfigPath;
 
     /**
      * @brief MD5 hash for graph pbtxt file
@@ -158,6 +169,22 @@ public:
     void setSubconfigPath(const std::string& subconfigPath);
 
     /**
+         * @brief Get the ModelMesh ModelsConfig Path
+         *
+         * @return const std::string&
+         */
+    const std::string& getModelMeshSubconfigPath() const {
+        return this->modelMeshSubconfigPath;
+    }
+
+    /**
+           * @brief Set the Model Mesh Models Config Path
+           *
+           * @param subconfigPath
+           */
+    void setModelMeshSubconfigPath(const std::string& subconfigPath);
+
+    /**
          * @brief Set root directory path
          *
          * @param rootDirectoryPath
@@ -187,5 +214,10 @@ public:
     * @return Status
     */
     Status parseNode(const rapidjson::Value& v);
+
+    /**
+    * @brief  Logs the content of the graph configuration
+    */
+    void logGraphConfigContent() const;
 };
 }  // namespace ovms

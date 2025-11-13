@@ -15,21 +15,27 @@
 //*****************************************************************************
 #include "rest_utils.hpp"
 
+#include <optional>
 #include <set>
-
+#include <sstream>
+#pragma warning(push)
+#pragma warning(disable : 6313)
 #include <rapidjson/document.h>
 #include <rapidjson/error/en.h>
 #include <rapidjson/istreamwrapper.h>
 #include <rapidjson/prettywriter.h>
+#pragma warning(pop)
 #include <spdlog/spdlog.h>
 
+#pragma warning(push)
+#pragma warning(disable : 6001 4324 6385 6386 6011 4457 6308 6387 6246)
 #include "absl/strings/escaping.h"
-
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wall"
 #pragma GCC diagnostic ignored "-Wunused-but-set-variable"
 #include "tensorflow_serving/util/json_tensor.h"
 #pragma GCC diagnostic pop
+#pragma warning(pop)
 #include "kfs_frontend/kfs_utils.hpp"
 #include "precision.hpp"
 #include "src/kfserving_api/grpc_predict_v2.grpc.pb.h"
@@ -54,8 +60,11 @@ enum : unsigned int {
 namespace ovms {
 
 static Status checkValField(const size_t& fieldSize, const size_t& expectedElementsNumber) {
-    if (fieldSize != expectedElementsNumber)
-        return StatusCode::REST_SERIALIZE_VAL_FIELD_INVALID_SIZE;
+    if (fieldSize != expectedElementsNumber) {
+        std::stringstream ss;
+        ss << "Expected val field elements number: " << expectedElementsNumber << "; actual: " << fieldSize;
+        return Status(StatusCode::REST_SERIALIZE_VAL_FIELD_INVALID_SIZE, ss.str());
+    }
     return StatusCode::OK;
 }
 
@@ -349,8 +358,11 @@ static Status parseOutputs(const ::KFSResponse& response_proto, rapidjson::Prett
         }
         size_t expectedElementsNumber = dataTypeSize > 0 ? expectedContentSize / dataTypeSize : 0;
 
-        if (!seekDataInValField && (tensor.datatype() != "BYTES" && response_proto.raw_output_contents(tensor_it).size() != expectedContentSize))
-            return StatusCode::REST_SERIALIZE_TENSOR_CONTENT_INVALID_SIZE;
+        if (!seekDataInValField && (tensor.datatype() != "BYTES" && response_proto.raw_output_contents(tensor_it).size() != expectedContentSize)) {
+            std::stringstream ss;
+            ss << "Expected raw output content size: " << expectedContentSize << "; actual: " << response_proto.raw_output_contents(tensor_it).size();
+            return Status(StatusCode::REST_SERIALIZE_TENSOR_CONTENT_INVALID_SIZE, ss.str());
+        }
         writer.StartObject();
         writer.Key("name");
         writer.String(tensor.name().c_str());
@@ -387,10 +399,14 @@ static Status parseOutputs(const ::KFSResponse& response_proto, rapidjson::Prett
             PARSE_OUTPUT_DATA(int64_contents, int64_t, Int64)
         } else if (tensor.datatype() == "UINT64") {
             PARSE_OUTPUT_DATA(uint64_contents, uint64_t, Uint64)
+        } else if (tensor.datatype() == "BOOL") {
+            PARSE_OUTPUT_DATA(bool_contents, bool, Bool)
         } else if (tensor.datatype() == "BYTES") {
             PARSE_OUTPUT_DATA_STRING(bytes_contents, String)
         } else {
-            return StatusCode::REST_UNSUPPORTED_PRECISION;
+            std::stringstream ss;
+            ss << "Unsupported precision" << tensor.datatype();
+            return Status(StatusCode::REST_UNSUPPORTED_PRECISION, ss.str());
         }
         if (!binaryOutput) {
             writer.EndArray();

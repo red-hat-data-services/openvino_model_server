@@ -18,15 +18,19 @@
 #include <algorithm>
 #include <filesystem>
 #include <limits>
+#include <optional>
 #include <set>
 #include <sstream>
-
+#include <utility>
+#pragma warning(push)
+#pragma warning(disable : 6313)
 #include <rapidjson/istreamwrapper.h>
 #include <rapidjson/stringbuffer.h>
 #include <rapidjson/writer.h>
-#include <spdlog/spdlog.h>
+#pragma warning(pop)
 
 #include "filesystem.hpp"
+#include "json_parser.hpp"
 #include "logging.hpp"
 #include "model_version_policy.hpp"
 #include "schema.hpp"
@@ -66,7 +70,6 @@ ModelConfig::ModelConfig(const std::string& name,
     setBatchingParams(configBatchSize);
 }
 
-const std::string ANONYMOUS_INPUT_NAME = "ANONYMOUS_INPUT_NAME";
 const std::string MAPPING_CONFIG_JSON = "mapping_config.json";
 
 bool ModelConfig::isDeviceUsed(const std::string& device) const {
@@ -205,7 +208,7 @@ std::tuple<Mode, std::optional<Dimension>> ModelConfig::extractBatchingParams(st
     Mode batchingMode = FIXED;
     std::optional<Dimension> effectiveBatchSize = std::nullopt;
     if (configBatchSize == "auto") {
-        SPDLOG_LOGGER_WARN(modelmanager_logger, "Batch size auto is deprecated. Use model dynamic shapes instead. Check (https://docs.openvino.ai/2023.2/ovms_docs_dynamic_shape_dynamic_model.html#doxid-ovms-docs-dynamic-shape-dynamic-model)");
+        SPDLOG_LOGGER_WARN(modelmanager_logger, "Batch size auto is deprecated. Use model dynamic shapes instead. Check (https://docs.openvino.ai/2023.3/ovms_docs_dynamic_shape_dynamic_model.html#doxid-ovms-docs-dynamic-shape-dynamic-model)");
         batchingMode = AUTO;
     } else if (configBatchSize == "") {
         // do nothing
@@ -289,61 +292,12 @@ Status ModelConfig::parseModelVersionPolicy(std::string command) {
     return StatusCode::MODEL_VERSION_POLICY_UNSUPPORTED_KEY;
 }
 
-Status ModelConfig::parsePluginConfig(const rapidjson::Value& node) {
-    if (!node.IsObject()) {
-        return StatusCode::PLUGIN_CONFIG_WRONG_FORMAT;
-    }
+Status ModelConfig::parsePluginConfig(std::string command, plugin_config_t& pluginConfig) {
+    return JsonParser::parsePluginConfig(std::move(command), pluginConfig);
+}
 
-    for (auto it = node.MemberBegin(); it != node.MemberEnd(); ++it) {
-        if (it->value.IsString()) {
-            if (((it->name.GetString() == std::string("CPU_THROUGHPUT_STREAMS")) && (it->value.GetString() == std::string("CPU_THROUGHPUT_AUTO"))) || ((it->name.GetString() == std::string("GPU_THROUGHPUT_STREAMS")) && (it->value.GetString() == std::string("GPU_THROUGHPUT_AUTO")))) {
-                pluginConfig["PERFORMANCE_HINT"] = "THROUGHPUT";
-                SPDLOG_WARN("{} plugin config key is deprecated. Use PERFORMANCE_HINT instead", it->name.GetString());
-            } else {
-                if ((it->name.GetString() == std::string("CPU_THROUGHPUT_STREAMS")) || (it->name.GetString() == std::string("GPU_THROUGHPUT_STREAMS"))) {
-                    pluginConfig["NUM_STREAMS"] = it->value.GetString();
-                    SPDLOG_WARN("{} plugin config key is deprecated. Use NUM_STREAMS instead", it->name.GetString());
-                } else if (it->name.GetString() == std::string("CPU_BIND_THREAD")) {
-                    if (it->value.GetString() == std::string("YES")) {
-                        pluginConfig["AFFINITY"] = "CORE";
-                        SPDLOG_WARN("{} plugin config key is deprecated. Use AFFINITY instead", it->name.GetString());
-                    } else if (it->value.GetString() == std::string("NO")) {
-                        pluginConfig["AFFINITY"] = "NONE";
-                        SPDLOG_WARN("{} plugin config key is deprecated. Use AFFINITY instead", it->name.GetString());
-                    } else {
-                        SPDLOG_ERROR("{} plugin config key has invalid value and is deprecated. Use AFFINITY key instead", it->name.GetString());
-                        return StatusCode::PLUGIN_CONFIG_WRONG_FORMAT;
-                    }
-                } else if (it->name.GetString() == std::string("CPU_THREADS_NUM")) {
-                    pluginConfig["INFERENCE_NUM_THREADS"] = it->value.GetString();
-                    SPDLOG_WARN("{} plugin config key is deprecated. Use INFERENCE_NUM_THREADS instead", it->name.GetString());
-                } else {
-                    pluginConfig[it->name.GetString()] = it->value.GetString();
-                }
-            }
-
-        } else if (it->value.IsInt64()) {
-            if (it->name.GetString() == std::string("CPU_THROUGHPUT_STREAMS") || it->name.GetString() == std::string("GPU_THROUGHPUT_STREAMS")) {
-                pluginConfig["NUM_STREAMS"] = std::to_string(it->value.GetInt64());
-                SPDLOG_WARN("{} plugin config key is deprecated. Use  NUM_STREAMS instead", it->name.GetString());
-            } else {
-                pluginConfig[it->name.GetString()] = std::to_string(it->value.GetInt64());
-            }
-        } else if (it->value.IsDouble()) {
-            if (it->name.GetString() == std::string("CPU_THROUGHPUT_STREAMS") || it->name.GetString() == std::string("GPU_THROUGHPUT_STREAMS")) {
-                pluginConfig["NUM_STREAMS"] = std::to_string(it->value.GetDouble());
-                SPDLOG_WARN("{} plugin config key is deprecated. Use  NUM_STREAMS instead", it->name.GetString());
-            } else {
-                pluginConfig[it->name.GetString()] = std::to_string(it->value.GetDouble());
-            }
-        } else if (it->value.IsBool()) {
-            pluginConfig[it->name.GetString()] = bool(it->value.GetBool());
-        } else {
-            return StatusCode::PLUGIN_CONFIG_WRONG_FORMAT;
-        }
-    }
-
-    return StatusCode::OK;
+Status ModelConfig::parsePluginConfig(const rapidjson::Value& node, plugin_config_t& pluginConfig) {
+    return JsonParser::parsePluginConfig(node, pluginConfig);
 }
 
 Status ModelConfig::parseShapeParameter(const rapidjson::Value& node) {
@@ -361,9 +315,9 @@ Status ModelConfig::parseShapeParameter(const rapidjson::Value& node) {
         if (!status.ok()) {
             return status;
         }
-        shapes[it->name.GetString()] = shapeInfo;
+        shapes[it->name.GetString()] = std::move(shapeInfo);
     }
-    this->shapes = shapes;
+    this->shapes = std::move(shapes);
 
     return StatusCode::OK;
 }
@@ -453,7 +407,7 @@ Status ModelConfig::parseLayoutParameter(const std::string& command) {
 
 Status ModelConfig::parseShape(ShapeInfo& shapeInfo, const std::string& str) {
     if (str == "auto") {
-        SPDLOG_LOGGER_WARN(modelmanager_logger, "Shape auto is deprecated. Use model dynamic shapes instead. Check (https://docs.openvino.ai/2023.2/ovms_docs_dynamic_shape_dynamic_model.html#doxid-ovms-docs-dynamic-shape-dynamic-model)");
+        SPDLOG_LOGGER_WARN(modelmanager_logger, "Shape auto is deprecated. Use model dynamic shapes instead. Check (https://docs.openvino.ai/2023.3/ovms_docs_dynamic_shape_dynamic_model.html#doxid-ovms-docs-dynamic-shape-dynamic-model)");
         shapeInfo.shapeMode = AUTO;
         return StatusCode::OK;
     }
@@ -488,7 +442,7 @@ Status ModelConfig::parseModelMapping() {
     }
     auto itr = doc.FindMember("inputs");
     if (itr == doc.MemberEnd()) {
-        SPDLOG_LOGGER_WARN(modelmanager_logger, "Couldn't load inputs object from file {}", path.c_str());
+        SPDLOG_LOGGER_WARN(modelmanager_logger, "Couldn't load inputs object from file {}", path.string());
     } else {
         // Process inputs
         for (const auto& key : itr->value.GetObject()) {
@@ -499,7 +453,7 @@ Status ModelConfig::parseModelMapping() {
     }
     itr = doc.FindMember("outputs");
     if (itr == doc.MemberEnd()) {
-        SPDLOG_LOGGER_WARN(modelmanager_logger, "Couldn't load outputs object from file {}", path.c_str());
+        SPDLOG_LOGGER_WARN(modelmanager_logger, "Couldn't load outputs object from file {}", path.string());
     } else {
         // Process outputs
         const auto it = doc.FindMember("outputs");
@@ -515,7 +469,12 @@ Status ModelConfig::parseModelMapping() {
 Status ModelConfig::parseNode(const rapidjson::Value& v) {
     this->setName(v["name"].GetString());
     try {
-        this->setBasePath(v["base_path"].GetString());
+        // Check for optional parameters
+        if (v.HasMember("base_path")) {
+            this->setBasePath(v["base_path"].GetString());
+        } else {
+            this->setBasePath("");
+        }
     } catch (std::logic_error& e) {
         SPDLOG_DEBUG("Relative path error: {}", e.what());
         return StatusCode::INTERNAL_ERROR;
@@ -615,7 +574,7 @@ Status ModelConfig::parseNode(const rapidjson::Value& v) {
     }
 
     if (v.HasMember("plugin_config")) {
-        auto status = parsePluginConfig(v["plugin_config"]);
+        auto status = this->parsePluginConfig(v["plugin_config"], this->pluginConfig);
         if (!status.ok()) {
             if (!firstErrorStatus.ok()) {
                 firstErrorStatus = status;
@@ -756,6 +715,9 @@ std::string ModelConfig::layoutConfigurationToString() const {
 }
 void ModelConfig::setBasePath(const std::string& basePath) {
     FileSystem::setPath(this->basePath, basePath, this->rootDirectoryPath);
+}
+const std::string ModelConfig::getPath() const {
+    return getLocalPath() + FileSystem::getOsSeparator() + std::to_string(version);
 }
 
 }  // namespace ovms

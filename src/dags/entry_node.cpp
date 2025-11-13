@@ -19,29 +19,37 @@
 #include <memory>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <utility>
 
 #include "../capi_frontend/capi_utils.hpp"
-#include "../deserialization.hpp"
+#include "../tfs_frontend/tfs_utils.hpp"
 #include "../kfs_frontend/kfs_utils.hpp"
+#include "../capi_frontend/deserialization.hpp"
+#include "../tfs_frontend/deserialization.hpp"
+#include "../kfs_frontend/deserialization.hpp"
+#include "../deserialization_main.hpp"
 #include "../logging.hpp"
 #include "../ov_utils.hpp"
 #include "../predict_request_validation_utils.hpp"
 #include "../profiler.hpp"
+#include "../regularovtensorfactory.hpp"
 #include "../tensor_conversion.hpp"
-#include "../tfs_frontend/tfs_utils.hpp"
+#include "../tensorinfo.hpp"
 #include "nodesession.hpp"
 
+#pragma warning(push)
+#pragma warning(disable : 4624 6001 6385 6386 6326 6011 4457 6308 6387 6246)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wall"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow_serving/apis/prediction_service.grpc.pb.h"
 #pragma GCC diagnostic pop
+#pragma warning(pop)
 
 namespace ovms {
 
 const std::string ENTRY_NODE_NAME = "request";
-
 template <typename RequestType>
 Status EntryNode<RequestType>::execute(session_key_t sessionId, PipelineEventQueue& notifyEndQueue) {
     OVMS_PROFILE_FUNCTION();
@@ -74,7 +82,7 @@ Status EntryNode<RequestType>::fetchResults(TensorWithSourceMap& outputs) {
     }
     InputSink<TensorWithSourceMap&> inputSink(outputs);
     bool isPipeline = true;
-    return deserializePredictRequest<ConcreteTensorProtoDeserializator>(*request, inputsInfo, inputSink, isPipeline);
+    return deserializePredictRequest<ConcreteTensorProtoDeserializator, InputSink<TensorWithSourceMap&>>(*request, inputsInfo, outputsInfo, inputSink, isPipeline, factories);
 }
 
 template <>
@@ -106,7 +114,7 @@ Status EntryNode<RequestType>::createShardedTensor(ov::Tensor& dividedTensor, Pr
         (precision == Precision::I16)) {
         dividedTensor = createTensorWithNoDataOwnership(ovmsPrecisionToIE2Precision(precision), shape, (void*)((char*)(tensor.data()) + i * step));
     } else {
-        return Node::createShardedTensor(dividedTensor, precision, shape, tensor, i, step, metadata, tensorName);
+        return Node::createShardedTensor(dividedTensor, precision, shape, tensor, i, step, metadata, std::move(tensorName));
     }
     return StatusCode::OK;
 }
@@ -117,6 +125,7 @@ const Status EntryNode<RequestType>::validate() {
     return request_validation_utils::validate(
         *request,
         inputsInfo,
+        outputsInfo,
         getRequestServableName(*request),
         1,
         optionalInputNames);  // Pipelines are not versioned and always reports version 1
@@ -128,7 +137,6 @@ template Status EntryNode<tensorflow::serving::PredictRequest>::execute(session_
 template Status EntryNode<::KFSRequest>::execute(session_key_t sessionId, PipelineEventQueue& notifyEndQueue);
 template Status EntryNode<tensorflow::serving::PredictRequest>::fetchResults(NodeSession& nodeSession, SessionResults& nodeSessionOutputs);
 template Status EntryNode<::KFSRequest>::fetchResults(NodeSession& nodeSession, SessionResults& nodeSessionOutputs);
-template Status EntryNode<tensorflow::serving::PredictRequest>::fetchResults(TensorWithSourceMap& outputs);
 template Status EntryNode<::KFSRequest>::fetchResults(TensorWithSourceMap& outputs);
 template Status EntryNode<tensorflow::serving::PredictRequest>::createShardedTensor(ov::Tensor& dividedTensor, Precision precision, const shape_t& shape, const ov::Tensor& tensor, size_t i, size_t step, const NodeSessionMetadata& metadata, const std::string tensorName);
 template Status EntryNode<::KFSRequest>::createShardedTensor(ov::Tensor& dividedTensor, Precision precision, const shape_t& shape, const ov::Tensor& tensor, size_t i, size_t step, const NodeSessionMetadata& metadata, const std::string tensorName);

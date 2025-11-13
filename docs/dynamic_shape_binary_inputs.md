@@ -36,9 +36,9 @@ pip3 install ovmsclient
 
 ### Download a Sample Image and Label Mappings
 ```bash
-wget https://raw.githubusercontent.com/openvinotoolkit/model_server/releases/2023/3/demos/common/static/images/zebra.jpeg
+wget https://raw.githubusercontent.com/openvinotoolkit/model_server/releases/2025/3/demos/common/static/images/zebra.jpeg
 
-wget https://raw.githubusercontent.com/openvinotoolkit/model_server/releases/2023/3/demos/common/python/classes.py
+wget https://raw.githubusercontent.com/openvinotoolkit/model_server/releases/2025/3/demos/common/python/classes.py
 ```
 
 ### Run Inference
@@ -57,6 +57,6 @@ output = client.predict(inputs={ "0": img}, model_name= "resnet")
 result_index = np.argmax(output[0]) 
 print(imagenet_classes[result_index])' >> predict.py
 
-python3 predict.py
+python predict.py
 zebra
 ```

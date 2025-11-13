@@ -70,7 +70,7 @@ static ov::element::Type_t CAPI2OVPrecision(OVMS_DataType datatype) {
         {OVMS_DATATYPE_U1, ov::element::Type_t::u1},
         {OVMS_DATATYPE_BOOL, ov::element::Type_t::boolean},
         {OVMS_DATATYPE_BF16, ov::element::Type_t::bf16},
-        {OVMS_DATATYPE_UNDEFINED, ov::element::Type_t::undefined},
+        {OVMS_DATATYPE_UNDEFINED, ov::element::Type_t::dynamic},
         {OVMS_DATATYPE_DYNAMIC, ov::element::Type_t::dynamic}
         //    {OVMS_DATATYPE_MIXED, ov::element::Type_t::MIXED},
         //    {OVMS_DATATYPE_Q78, ov::element::Type_t::Q78},
@@ -79,7 +79,7 @@ static ov::element::Type_t CAPI2OVPrecision(OVMS_DataType datatype) {
     };
     auto it = precisionMap.find(datatype);
     if (it == precisionMap.end()) {
-        return ov::element::Type_t::undefined;
+        return ov::element::Type_t::dynamic;
     }
     return it->second;
 }
@@ -102,7 +102,6 @@ static OVMS_DataType OVPrecision2CAPI(ov::element::Type_t datatype) {
         {ov::element::Type_t::u1, OVMS_DATATYPE_U1},
         {ov::element::Type_t::boolean, OVMS_DATATYPE_BOOL},
         {ov::element::Type_t::bf16, OVMS_DATATYPE_BF16},
-        {ov::element::Type_t::undefined, OVMS_DATATYPE_UNDEFINED},
         {ov::element::Type_t::dynamic, OVMS_DATATYPE_DYNAMIC}
         //    {ov::element::Type_t::, OVMS_DATATYPE_MIXEDMIXED},
         //    {ov::element::Type_t::, OVMS_DATATYPE_Q78Q78},
@@ -121,7 +120,7 @@ static ov::Tensor* makeOvTensor(OVMS_DataType datatype, const int64_t* shape, ui
     for (size_t i = 0; i < dimCount; ++i) {
         ovShape.push_back(shape[i]);
     }
-    // here we make copy of underlying OVMS repsonse tensor
+    // here we make copy of underlying OVMS response tensor
     ov::Tensor* output = new ov::Tensor(CAPI2OVPrecision(datatype), ovShape);
     std::memcpy(output->data(), voutputData, bytesize);
     return output;
@@ -131,7 +130,7 @@ static ov::Tensor makeOvTensorO(OVMS_DataType datatype, const int64_t* shape, ui
     for (size_t i = 0; i < dimCount; ++i) {
         ovShape.push_back(shape[i]);
     }
-    // here we make copy of underlying OVMS repsonse tensor
+    // here we make copy of underlying OVMS response tensor
     ov::Tensor output(CAPI2OVPrecision(datatype), ovShape);
     std::memcpy(output.data(), voutputData, bytesize);
     return output;
@@ -169,7 +168,7 @@ public:
             // Close is called on input node and output node in initial pipeline
             // Commented out since for now this happens twice in 2 nodes graph. Server will close
             // OVMS_ServerDelete(cserver);
-            // moreover we may need several ovms calculators use in graph each providing its own model? how to handle then different model inputs, as wel as config?
+            // moreover we may need several ovms calculators use in graph each providing its own model? how to handle then different model inputs, as well as config?
         }
         return absl::OkStatus();
     }

@@ -25,10 +25,13 @@
 #include <utility>
 #include <vector>
 
+#pragma warning(push)
+#pragma warning(disable : 6001 4324 6308 6387 6246)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wall"
 #include "tensorflow_serving/apis/prediction_service.grpc.pb.h"
 #pragma GCC diagnostic pop
+#pragma warning(pop)
 #include "../kfs_frontend/kfs_grpc_inference_service.hpp"
 
 namespace ovms {
@@ -65,8 +68,6 @@ private:
 public:
     Status create(std::shared_ptr<MediapipeGraphExecutor>& pipeline,
         const std::string& name,
-        const KFSRequest* request,
-        KFSResponse* response,
         ModelManager& manager) const;
 
     MediapipeGraphDefinition* findDefinitionByName(const std::string& name) const;
@@ -78,6 +79,10 @@ public:
     Status revalidatePipelines(ModelManager&);
     const std::vector<std::string> getMediapipePipelinesNames() const;
     ~MediapipeFactory();
+
+    std::shared_mutex& getDefinitionsMtx() const {
+        return definitionsMtx;
+    }
 };
 
 }  // namespace ovms

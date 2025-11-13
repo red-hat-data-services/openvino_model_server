@@ -18,18 +18,22 @@
 #include <fstream>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <tuple>
 #include <unordered_map>
 #include <vector>
-
+#pragma warning(push)
+#pragma warning(disable : 6313)
 #include <rapidjson/document.h>
+#pragma warning(pop)
 
+#include "anonymous_input_name.hpp"
 #include "layout_configuration.hpp"
 #include "modelversion.hpp"
 #include "shape.hpp"
-#include "status.hpp"
+#include "status.hpp"  // TODO fwd dec
 
 namespace ovms {
 class ModelVersionPolicy;
@@ -38,7 +42,6 @@ using mapping_config_t = std::unordered_map<std::string, std::string>;
 using plugin_config_t = std::map<std::string, ov::Any>;
 using custom_loader_options_config_t = std::map<std::string, std::string>;
 
-extern const std::string ANONYMOUS_INPUT_NAME;
 extern const std::string MAPPING_CONFIG_JSON;
 const uint32_t DEFAULT_MAX_SEQUENCE_NUMBER = 500;
 
@@ -90,7 +93,7 @@ private:
     /**
          * @brief Nireq
          */
-    uint64_t nireq;
+    uint32_t nireq;
 
     /**
          * @brief Flag determining if model is stateful
@@ -178,7 +181,7 @@ private:
     static const char shapeRight = ')';
 
     /**
-         * @brief Shape delimeter in string format
+         * @brief Shape delimiter in string format
          */
     static const char shapeDelimeter = ',';
 
@@ -288,9 +291,7 @@ public:
          * 
          * @return std::string
          * */
-    const std::string getPath() const {
-        return getLocalPath() + "/" + std::to_string(version);
-    }
+    const std::string getPath() const;
 
     /**
          * @brief Get the base path
@@ -498,9 +499,9 @@ public:
     /**
          * @brief Get the nireq
          * 
-         * @return uint64_t 
+         * @return uint32_t 
          */
-    uint64_t getNireq() const {
+    uint32_t getNireq() const {
         return this->nireq;
     }
 
@@ -509,7 +510,7 @@ public:
          * 
          * @param nireq 
          */
-    void setNireq(const uint64_t nireq) {
+    void setNireq(const uint32_t nireq) {
         this->nireq = nireq;
     }
 
@@ -519,6 +520,15 @@ public:
          * @return const std::string&
          */
     const plugin_config_t& getPluginConfig() const {
+        return this->pluginConfig;
+    }
+
+    /**
+         * @brief Get the plugin config
+         * 
+         * @return const std::string&
+         */
+    plugin_config_t& getPluginConfig() {
         return this->pluginConfig;
     }
 
@@ -610,26 +620,16 @@ public:
          * 
          * @return status
          */
-    Status parsePluginConfig(const rapidjson::Value& node);
+    Status parsePluginConfig(const rapidjson::Value& node, plugin_config_t& pluginConfig);
 
     /**
-         * @brief Parses string for plugin config keys and values
-         * 
-         * @param string representing plugin_config
-         * 
-         * @return status
-         */
-    Status parsePluginConfig(std::string command) {
-        rapidjson::Document node;
-        if (command.empty()) {
-            return StatusCode::OK;
-        }
-        if (node.Parse(command.c_str()).HasParseError()) {
-            return StatusCode::PLUGIN_CONFIG_WRONG_FORMAT;
-        }
-
-        return parsePluginConfig(node);
-    }
+        * @brief Parses string for plugin config keys and values
+        * 
+        * @param string representing plugin_config
+        * 
+        * @return status
+        */
+    Status parsePluginConfig(std::string command, plugin_config_t& pluginConfig);
 
     /**
          * @brief Parses value from json and extracts shapes info

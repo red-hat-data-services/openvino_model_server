@@ -18,7 +18,6 @@
 #include <cstdint>
 
 namespace ovms {
-
 struct ExecutionContext {
     enum class Interface : uint8_t {
         GRPC,
@@ -36,8 +35,13 @@ struct ExecutionContext {
 
         // KServe
         ModelInfer,
+        ModelInferStream,
         ModelReady,
         ModelMetadata,
+
+        // V3
+        V3Unary,
+        V3Stream,
     };
 
     Interface interface;
@@ -47,5 +51,4 @@ struct ExecutionContext {
         interface(interface),
         method(method) {}
 };
-
 }  // namespace ovms

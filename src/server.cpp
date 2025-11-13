@@ -28,13 +28,26 @@
 #include <grpcpp/server.h>
 #include <grpcpp/server_builder.h>
 #include <grpcpp/server_context.h>
-#include <netinet/in.h>
 #include <signal.h>
 #include <stdlib.h>
+
+#ifdef __linux__
+#include <netinet/in.h>
 #include <sys/socket.h>
 #include <sysexits.h>
-#include <unistd.h>
+#elif _WIN32
+#include <csignal>
 
+#include <ntstatus.h>
+#include <winsock2.h>
+#pragma comment(lib, "ws2_32.lib")
+#include <windows.h>
+#endif
+#ifdef __linux__
+#include <unistd.h>
+#endif
+
+#include "capi_frontend/capimodule.hpp"
 #include "capi_frontend/server_settings.hpp"
 #include "cli_parser.hpp"
 #include "config.hpp"
@@ -46,27 +59,23 @@
 #include "metric_module.hpp"
 #include "model_service.hpp"
 #include "modelmanager.hpp"
+#include "ovms_exit_codes.hpp"
 #include "prediction_service.hpp"
 #include "profiler.hpp"
 #include "profilermodule.hpp"
+#include "pull_module/hf_pull_model_module.hpp"
 #include "servablemanagermodule.hpp"
+#include "servables_config_manager_module/servablesconfigmanagermodule.hpp"
 #include "stringutils.hpp"
 #include "version.hpp"
 
 #if (PYTHON_DISABLE == 0)
-#include "pythoninterpretermodule.hpp"
+#include "python/pythoninterpretermodule.hpp"
 #endif
 
 using grpc::ServerBuilder;
 
 namespace ovms {
-const std::string PROFILER_MODULE_NAME = "ProfilerModule";
-const std::string GRPC_SERVER_MODULE_NAME = "GRPCServerModule";
-const std::string HTTP_SERVER_MODULE_NAME = "HTTPServerModule";
-const std::string SERVABLE_MANAGER_MODULE_NAME = "ServableManagerModule";
-const std::string METRICS_MODULE_NAME = "MetricsModule";
-const std::string PYTHON_INTERPRETER_MODULE_NAME = "PythonInterpreterModule";
-
 namespace {
 volatile sig_atomic_t shutdown_request = 0;
 }
@@ -82,6 +91,11 @@ static void logConfig(const Config& config) {
     SPDLOG_INFO(project_name + " " + project_version);
     SPDLOG_INFO("OpenVINO backend {}", OPENVINO_NAME);
     SPDLOG_DEBUG("CLI parameters passed to ovms server");
+    if (config.getServerSettings().serverMode == HF_PULL_MODE) {
+        SPDLOG_DEBUG("source_model: {}", config.getServerSettings().hfSettings.sourceModel);
+        SPDLOG_DEBUG("model_repository_path: {}", config.getServerSettings().hfSettings.downloadPath);
+        return;
+    }
     if (config.configPath().empty()) {
         SPDLOG_DEBUG("model_path: {}", config.modelPath());
         SPDLOG_DEBUG("model_name: {}", config.modelName());
@@ -109,8 +123,9 @@ static void logConfig(const Config& config) {
     SPDLOG_DEBUG("gRPC channel arguments: {}", config.grpcChannelArguments());
     SPDLOG_DEBUG("log level: {}", config.logLevel());
     SPDLOG_DEBUG("log path: {}", config.logPath());
-    SPDLOG_DEBUG("file system poll wait seconds: {}", config.filesystemPollWaitSeconds());
+    SPDLOG_DEBUG("file system poll wait milliseconds: {}", config.filesystemPollWaitMilliseconds());
     SPDLOG_DEBUG("sequence cleaner poll wait minutes: {}", config.sequenceCleanerPollWaitMinutes());
+    SPDLOG_DEBUG("model_repository_path: {}", config.getServerSettings().hfSettings.downloadPath);
 }
 
 static void onInterrupt(int status) {
@@ -124,6 +139,8 @@ static void onTerminate(int status) {
 static void onIllegal(int status) {
     shutdown_request = 2;
 }
+
+#ifdef __linux__
 
 static void installSignalHandlers() {
     static struct sigaction sigIntHandler;
@@ -144,6 +161,30 @@ static void installSignalHandlers() {
     sigIllHandler.sa_flags = 0;
     sigaction(SIGILL, &sigIllHandler, NULL);
 }
+#elif _WIN32
+
+static BOOL WINAPI onConsoleEvent(DWORD event) {
+    switch (event) {
+    case CTRL_C_EVENT:
+        onInterrupt(SIGINT);
+        return TRUE;
+    case CTRL_CLOSE_EVENT:
+    case CTRL_SHUTDOWN_EVENT:
+        onTerminate(SIGTERM);
+        return TRUE;
+    default:
+        return FALSE;
+    }
+}
+
+static void installSignalHandlers() {
+    SetConsoleCtrlHandler(onConsoleEvent, TRUE);
+    signal(SIGINT, onInterrupt);
+    signal(SIGTERM, onTerminate);
+    signal(SIGILL, onIllegal);
+}
+
+#endif
 
 ModuleState Module::getState() const {
     return state;
@@ -159,15 +200,18 @@ bool Server::isReady() const {
     return true;
 }
 
-bool Server::isLive() const {
-    // we might want at some time start REST only/ or respond with true only if both servers started if both are requested to start
-    // This is to be resolved especially if we implement REST API for Kserver & potentially switch to check for starting specific module
+bool Server::isLive(const std::string& moduleName) const {
     std::shared_lock lock(modulesMtx);
-    auto it = modules.find(GRPC_SERVER_MODULE_NAME);
-    if (it == modules.end())
+    if (modules.size() == 0) {
         return false;
-    if (ModuleState::INITIALIZED != it->second->getState())
+    }
+    auto it = modules.find(moduleName);
+    if (it == modules.end()) {
         return false;
+    }
+    if (ModuleState::INITIALIZED != it->second->getState()) {
+        return false;
+    }
     return true;
 }
 
@@ -212,6 +256,12 @@ std::unique_ptr<Module> Server::createModule(const std::string& name) {
 #endif
     if (name == METRICS_MODULE_NAME)
         return std::make_unique<MetricModule>();
+    if (name == CAPI_MODULE_NAME)
+        return std::make_unique<CAPIModule>(*this);
+    if (name == HF_MODEL_PULL_MODULE_NAME)
+        return std::make_unique<HfPullModelModule>();
+    if (name == SERVABLES_CONFIG_MANAGER_MODULE_NAME)
+        return std::make_unique<ServablesConfigManagerModule>();
     return nullptr;
 }
 
@@ -238,22 +288,46 @@ std::unique_ptr<Module> Server::createModule(const std::string& name) {
         }                                                                                             \
     }
 
-Status Server::startModules(ovms::Config& config, bool withPython) {
+Status Server::startModules(ovms::Config& config) {
     // The order of starting modules is slightly different from inserting modules
     // due to dependency of modules on each other during runtime
     // To avoid unnecessary runtime calls in eg. prediction we have different order
     // of modules creation than start
+    // CAPI module is required for MP to work
+    // CAPI should start after SERVABLE is added
     // HTTP depends on GRPC, SERVABLE, METRICS
     // GRPC depends on SERVABLE
     // SERVABLE depends on metrics, python
     // while we want to start the server as quickly as possible to respond with liveness probe
-    // thats why we delay starting the servable until the very end while we need to create it before
+    // that's why we delay starting the servable until the very end while we need to create it before
     // GRPC & REST
     Status status;
     bool inserted = false;
     auto it = modules.end();
+    if (config.getServerSettings().serverMode == UNKNOWN_MODE) {
+        SPDLOG_ERROR("Server mode is not set.");
+        return StatusCode::INTERNAL_ERROR;
+    }
+    if (config.getServerSettings().serverMode == LIST_MODELS_MODE || config.getServerSettings().serverMode == MODIFY_CONFIG_MODE) {
+        INSERT_MODULE(SERVABLES_CONFIG_MANAGER_MODULE_NAME, it);
+        START_MODULE(it);
+        return status;
+    }
+    if (config.getServerSettings().serverMode == HF_PULL_MODE || config.getServerSettings().serverMode == HF_PULL_AND_START_MODE) {
+        INSERT_MODULE(HF_MODEL_PULL_MODULE_NAME, it);
+        START_MODULE(it);
+        if (!status.ok()) {
+            return status;
+        }
+        auto hfModule = dynamic_cast<const HfPullModelModule*>(it->second.get());
+        status = hfModule->clone();
+        // Return from modules only in --pull mode or error, otherwise start the rest of modules
+        if (config.getServerSettings().serverMode == HF_PULL_MODE || !status.ok())
+            return status;
+    }
+
 #if (PYTHON_DISABLE == 0)
-    if (withPython) {
+    if (config.getServerSettings().withPython) {
         INSERT_MODULE(PYTHON_INTERPRETER_MODULE_NAME, it);
         START_MODULE(it);
     }
@@ -269,6 +343,8 @@ Status Server::startModules(ovms::Config& config, bool withPython) {
     // we need servable module during GRPC/HTTP requests so create it here
     // but start it later to quickly respond with liveness probe
     INSERT_MODULE(SERVABLE_MANAGER_MODULE_NAME, it);
+    INSERT_MODULE(CAPI_MODULE_NAME, it);
+    START_MODULE(it);
     INSERT_MODULE(GRPC_SERVER_MODULE_NAME, it);
     START_MODULE(it);
     // if we ever decide not to start GRPC module then we need to implement HTTP responses without using grpc implementations
@@ -279,8 +355,8 @@ Status Server::startModules(ovms::Config& config, bool withPython) {
     GET_MODULE(SERVABLE_MANAGER_MODULE_NAME, it);
     START_MODULE(it);
 #if (PYTHON_DISABLE == 0)
-    it = modules.find(PYTHON_INTERPRETER_MODULE_NAME);
-    if (it != modules.end()) {
+    if (config.getServerSettings().withPython) {
+        GET_MODULE(PYTHON_INTERPRETER_MODULE_NAME, it);
         auto pythonModule = dynamic_cast<const PythonInterpreterModule*>(it->second.get());
         pythonModule->releaseGILFromThisThread();
     }
@@ -309,52 +385,66 @@ public:
 void Server::shutdownModules() {
     // we want very precise order of modules shutdown
     // first we should stop incoming new requests
+    ensureModuleShutdown(HF_MODEL_PULL_MODULE_NAME);
     ensureModuleShutdown(GRPC_SERVER_MODULE_NAME);
     ensureModuleShutdown(HTTP_SERVER_MODULE_NAME);
     ensureModuleShutdown(SERVABLE_MANAGER_MODULE_NAME);
     ensureModuleShutdown(PROFILER_MODULE_NAME);
 #if (PYTHON_DISABLE == 0)
-    ensureModuleShutdown(PYTHON_INTERPRETER_MODULE_NAME);
+    if (ovms::Config::instance().getServerSettings().withPython) {
+        ensureModuleShutdown(PYTHON_INTERPRETER_MODULE_NAME);
+    }
 #endif
     // we need to be able to quickly start grpc or start it without port
     // this is because the OS can have a delay between freeing up port before it can be requested and used again
+    std::shared_lock lock(modulesMtx);
     modules.clear();
 }
 
 static int statusToExitCode(const Status& status) {
     if (status.ok()) {
-        return EX_OK;
+        return OVMS_EX_OK;
     } else if (status == StatusCode::OPTIONS_USAGE_ERROR) {
-        return EX_USAGE;
+        return OVMS_EX_USAGE;
     }
-    return EXIT_FAILURE;
+    return OVMS_EX_FAILURE;
 }
 
 // OVMS Start
 int Server::start(int argc, char** argv) {
     installSignalHandlers();
-    CLIParser parser;
-    ServerSettingsImpl serverSettings;
-    ModelsSettingsImpl modelsSettings;
-    parser.parse(argc, argv);
-    parser.prepare(&serverSettings, &modelsSettings);
-    Status ret = start(&serverSettings, &modelsSettings);
-    ModulesShutdownGuard shutdownGuard(*this);
-    if (!ret.ok()) {
-        return statusToExitCode(ret);
+    int result = OVMS_EX_OK;
+
+    try {
+        CLIParser parser;
+        ServerSettingsImpl serverSettings;
+        ModelsSettingsImpl modelsSettings;
+        parser.parse(argc, argv);
+        parser.prepare(&serverSettings, &modelsSettings);
+
+        Status ret = start(&serverSettings, &modelsSettings);
+        ModulesShutdownGuard shutdownGuard(*this);
+        if (!ret.ok()) {
+            return statusToExitCode(ret);
+        }
+        while (!shutdown_request &&
+               (serverSettings.serverMode == HF_PULL_AND_START_MODE || serverSettings.serverMode == SERVING_MODELS_MODE)) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        }
+        if (shutdown_request == 2) {
+            SPDLOG_ERROR("Illegal operation. OVMS started on unsupported device");
+        }
+    } catch (const std::exception& e) {
+        SPDLOG_ERROR("Exception; {}", e.what());
+        result = OVMS_EX_FAILURE;
+        return result;
     }
-    while (!shutdown_request) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
-    }
-    if (shutdown_request == 2) {
-        SPDLOG_ERROR("Illegal operation. OVMS started on unsupported device");
-    }
-    SPDLOG_INFO("Shutting down");
+
     return EXIT_SUCCESS;
 }
 
 // C-API Start
-Status Server::start(ServerSettingsImpl* serverSettings, ModelsSettingsImpl* modelsSettings, bool withPython) {
+Status Server::start(ServerSettingsImpl* serverSettings, ModelsSettingsImpl* modelsSettings) {
     try {
         std::unique_lock lock{this->startMtx, std::defer_lock};
         auto locked = lock.try_lock();
@@ -362,16 +452,19 @@ Status Server::start(ServerSettingsImpl* serverSettings, ModelsSettingsImpl* mod
             SPDLOG_ERROR("Cannot start OVMS - server is already starting");
             return StatusCode::SERVER_ALREADY_STARTING;
         }
-        if (this->isLive()) {
+        std::unique_lock lockModules(modulesMtx);
+        if (!modules.empty()) {
             SPDLOG_ERROR("Cannot start OVMS - server is already live");
             return StatusCode::SERVER_ALREADY_STARTED;
         }
+        lockModules.unlock();
         auto& config = ovms::Config::instance();
         if (!config.parse(serverSettings, modelsSettings))
             return StatusCode::OPTIONS_USAGE_ERROR;
         configure_logger(config.logLevel(), config.logPath());
-        logConfig(config);
-        return this->startModules(config, withPython);
+        if (serverSettings->serverMode == HF_PULL_AND_START_MODE || serverSettings->serverMode == SERVING_MODELS_MODE)
+            logConfig(config);
+        return this->startModules(config);
     } catch (std::exception& e) {
         SPDLOG_ERROR("Exception catch: {} - will now terminate.", e.what());
         return Status(StatusCode::INTERNAL_ERROR, e.what());

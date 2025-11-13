@@ -18,10 +18,12 @@
 
 #include <memory>
 #include <string>
-
+#pragma warning(push)
+#pragma warning(disable : 6326 28182 6011 28020)
 #include <pybind11/embed.h>
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
+#pragma warning(pop)
 
 #include "../logging.hpp"
 namespace py = pybind11;
@@ -77,10 +79,14 @@ public:
 };
 
 class UnexpectedPythonObjectError : public std::exception {
+protected:
     std::string message;
 
 public:
     UnexpectedPythonObjectError() = delete;
+    UnexpectedPythonObjectError(const UnexpectedPythonObjectError& exception) {
+        this->message = std::string(exception.what());
+    }
     UnexpectedPythonObjectError(const py::object& obj, const std::string& expectedType) {
         py::gil_scoped_acquire acquire;
         std::string objectType = obj.attr("__class__").attr("__name__").cast<std::string>();
@@ -90,6 +96,19 @@ public:
     const char* what() const throw() override {
         return message.c_str();
     }
+};
+
+class UnexpectedInputPythonObjectError : UnexpectedPythonObjectError {
+public:
+    UnexpectedInputPythonObjectError(const UnexpectedPythonObjectError& exception) :
+        UnexpectedPythonObjectError(exception) {}
+    const char* what() const throw() override { return UnexpectedPythonObjectError::what(); }
+};
+class UnexpectedOutputPythonObjectError : UnexpectedPythonObjectError {
+public:
+    UnexpectedOutputPythonObjectError(const UnexpectedPythonObjectError& exception) :
+        UnexpectedPythonObjectError(exception) {}
+    const char* what() const throw() override { return UnexpectedPythonObjectError::what(); }
 };
 
 class BadPythonNodeConfigurationError : public std::exception {

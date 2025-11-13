@@ -17,11 +17,15 @@
 
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <vector>
 
+#pragma warning(push)
+#pragma warning(disable : 6326 28182 6011 28020)
 #include <pybind11/pybind11.h>
+#pragma warning(pop)
 
 namespace py = pybind11;
 
@@ -29,7 +33,7 @@ namespace ovms {
 
 // KServe API defines data types
 // https://github.com/kserve/kserve/blob/master/docs/predict-api/v2/required_api.md#tensor-data-types
-// Struct string-syntax for buffer fromat description
+// Struct string-syntax for buffer format description
 // https://docs.python.org/3/library/struct.html#format-characters
 
 const std::unordered_map<std::string, std::string> datatypeToBufferFormat{
@@ -92,6 +96,12 @@ private:
     std::unique_ptr<char[]> ownedDataPtr;
 
 public:
+    // Construct object from buffer info. By default shape and datatype are inferred from the buffer, but can be set directly if needed.
+    OvmsPyTensor(const std::string& name, const py::buffer& buffer, const std::optional<std::vector<py::ssize_t>>& shape, const std::optional<std::string>& datatype);
+    // Construct empty object. If allocate flag is set, allocate empty buffer of set size, otherwise buffer pointer will be uninitialized.
+    OvmsPyTensor(const std::string& name, const std::vector<py::ssize_t>& shape, const std::string& datatype, py::ssize_t size, bool allocate = true);
+    // Construct object from request contents. If copy flag is set, copy data to object's own buffer, otherwise set buffer pointer to original data.
+    OvmsPyTensor(const std::string& name, void* data, const std::vector<py::ssize_t>& shape, const std::string& datatype, py::ssize_t size, bool copy = true);
     std::string name;
     // Can be one of Kserve datatypes (like UINT8, FP32 etc.) or totally custom like numpy (for example "<U83")
     std::string datatype;
@@ -109,18 +119,12 @@ public:
     py::ssize_t itemsize;
     std::vector<py::ssize_t> strides;
 
-    // Reference to the Python object that owns underlaying data buffer
+    // Reference to the Python object that owns underlying data buffer
     py::object refObj;
 
     // ---
 
     OvmsPyTensor(const OvmsPyTensor& other) = delete;
     OvmsPyTensor() = delete;
-
-    // Construct object from request contents
-    OvmsPyTensor(const std::string& name, void* data, const std::vector<py::ssize_t>& shape, const std::string& datatype, py::ssize_t size, bool copy);
-
-    // Construct object from buffer info
-    OvmsPyTensor(const std::string& name, const py::buffer& buffer);
 };
 }  // namespace ovms

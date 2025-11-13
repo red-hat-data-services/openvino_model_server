@@ -34,7 +34,7 @@
 namespace ovms {
 
 class ModelManager;
-class NodeInfo;
+struct NodeInfo;
 class Pipeline;
 class PipelineDefinition;
 class Status;
@@ -76,6 +76,10 @@ public:
     void retireOtherThan(std::set<std::string>&& pipelinesInConfigFile, ModelManager& manager);
     Status revalidatePipelines(ModelManager&);
     const std::vector<std::string> getPipelinesNames() const;
+
+    std::shared_mutex& getDefinitionsMtx() const {
+        return definitionsMtx;
+    }
 };
 
 }  // namespace ovms

@@ -1,15 +1,15 @@
 # Prediction Example with an ONNX Model {#ovms_demo_using_onnx_model}
 
 Steps are similar to when you work with IR model format. Model Server accepts ONNX models as well with no differences in versioning. Locate ONNX model file in separate model version directory.
-Below is a complete functional use case using Python 3.7 or higher. 
+Below is a complete functional use case using Python 3.7 or higher.
 For this example let's use a public [ONNX ResNet](https://github.com/onnx/models/tree/main/validated/vision/classification/resnet) model - resnet50-caffe2-v1-9.onnx model.
 
 This model requires additional [preprocessing function](https://github.com/onnx/models/tree/main/validated/vision/classification/resnet#preprocessing). Preprocessing can be performed in the client by manipulating data before sending the request. Preprocessing can be also delegated to the server by creating a [DAG](../../../docs/dag_scheduler.md) and using a custom processing node. Both methods will be explained below.
 
-<a href="#client-side">Option 1: Adding preprocessing to the client side</a>  
-<a href="#server-side">Option 2: Adding preprocessing to the server side (building DAG)</a>
+[Option 1: Adding preprocessing to the client side](#option-1-adding-preprocessing-to-the-client-side)
+[Option 2: Adding preprocessing to the server side (building DAG)](#option-2-adding-preprocessing-to-the-server-side-building-a-dag)
 
-## Option 1: Adding preprocessing to the client side <a name="client-side"></a>
+## Option 1: Adding preprocessing to the client side
 
 Clone the repository and enter using_onnx_model directory
 ```bash
@@ -17,7 +17,7 @@ git clone https://github.com/openvinotoolkit/model_server.git
 cd model_server/demos/using_onnx_model/python
 ```
 
-Prepare workspace with the model by running: 
+Prepare workspace with the model by running:
 ```bash
 make client_preprocessing
 ```
@@ -46,14 +46,14 @@ The `onnx_model_demo.py` script can run inference both with and without performi
 
 Run the client with preprocessing:
 ```bash
-python3 onnx_model_demo.py --service_url localhost:9001 --run_preprocessing
+python onnx_model_demo.py --service_url localhost:9001 --run_preprocessing
 Running with preprocessing on client side
 ../../common/static/images/bee.jpeg (1, 3, 224, 224) ; data range: -2.117904 : 2.64
 Class is with highest score: 309
 Detected class name: bee
 ```
 
-## Option 2: Adding preprocessing to the server side (building a DAG) <a name="server-side"></a>
+## Option 2: Adding preprocessing to the server side (building a DAG)
 
 Prepare workspace with the model, preprocessing node library and configuration file by running:
 ```bash
@@ -77,18 +77,18 @@ docker run -d -u $(id -u):$(id -g) -v $(pwd)/workspace:/workspace -p 9001:9001 o
 --config_path /workspace/config.json --port 9001
 ```
 
-The `onnx_model_demo.py` script can run inference both with and without performing preprocessing. Since in this variant preprocessing is done by the model server (via custom node), there's no need to perform any image preprocessing on the client side. In that case, run without `--run_preprocessing` option. See [preprocessing function](https://github.com/openvinotoolkit/model_server/blob/releases/2023/3/demos/using_onnx_model/python/onnx_model_demo.py#L26-L33) run in the client.
+The `onnx_model_demo.py` script can run inference both with and without performing preprocessing. Since in this variant preprocessing is done by the model server (via custom node), there's no need to perform any image preprocessing on the client side. In that case, run without `--run_preprocessing` option. See [preprocessing function](https://github.com/openvinotoolkit/model_server/blob/releases/2025/3/demos/using_onnx_model/python/onnx_model_demo.py#L26-L33) run in the client.
 
 Run the client without preprocessing:
 ```bash
-python3 onnx_model_demo.py --service_url localhost:9001
+python onnx_model_demo.py --service_url localhost:9001
 Running without preprocessing on client side
 Class is with highest score: 309
 Detected class name: bee
 ```
 
 ## Node parameters explanation
-Additional preprocessing step applies a division and an subtraction to each pixel value in the image. This calculation is configured by passing two parameters to _image transformation_ custom node in [config.json](https://github.com/openvinotoolkit/model_server/blob/releases/2023/3/demos/using_onnx_model/python/config.json#L32-L33):
+Additional preprocessing step applies a division and an subtraction to each pixel value in the image. This calculation is configured by passing two parameters to _image transformation_ custom node in [config.json](https://github.com/openvinotoolkit/model_server/blob/releases/2025/3/demos/using_onnx_model/python/config.json#L32-L33):
 ```
 "params": {
   ...

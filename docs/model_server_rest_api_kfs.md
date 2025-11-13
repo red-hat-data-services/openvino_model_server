@@ -4,14 +4,14 @@
 In addition with [gRPC APIs](./model_server_grpc_api_kfs.md) OpenVINO&trade; model server also supports RESTful APIs which follows the documentation from [KServe REST API](https://github.com/kserve/kserve/blob/master/docs/predict-api/v2/required_api.md#httprest). REST API is recommended when the primary goal is in reducing the number of client-side python dependencies and simpler application code.
 
 This document covers the following API:
-* <a href="#kfs-server-live">Server Live API </a>
-* <a href="#kfs-server-ready">Server Ready API </a>
-* <a href="#kfs-server-metadata">Server Metadata API </a>
-* <a href="#kfs-model-ready">Model Ready API </a>
-* <a href="#kfs-model-metadata">Model Metadata API </a>
-* <a href="#kfs-model-infer"> Inference API </a>
+* [Server Live API](#server-live-api)
+* [Server Ready API](#server-ready-api)
+* [Server Metadata API](#server-metadata-api)
+* [Model Ready API](#model-ready-api)
+* [Model Metadata API](#model-metadata-api)
+* [Inference API](#inference-api)
 
-## Server Live API <a name="kfs-server-live"></a>
+## Server Live API
 **Description**
 
 Get information about server liveness.
@@ -36,9 +36,9 @@ Date: Tue, 09 Aug 2022 09:20:24 GMT
 Content-Length: 2
 ```
 
-See also [code samples](https://github.com/openvinotoolkit/model_server/tree/releases/2023/3/client/python/kserve-api/samples) for getting server liveness with KServe API on HTTP Server Live endpoint.
+See also [code samples](https://github.com/openvinotoolkit/model_server/tree/releases/2025/3/client/python/kserve-api/samples) for getting server liveness with KServe API on HTTP Server Live endpoint.
 
-## Server Ready API <a name="kfs-server-ready"></a>
+## Server Ready API
 **Description**
 
 Get information about server readiness.
@@ -63,9 +63,9 @@ Date: Tue, 09 Aug 2022 09:22:14 GMT
 Content-Length: 2
 ```
 
-See also [code samples](https://github.com/openvinotoolkit/model_server/tree/releases/2023/3/client/python/kserve-api/samples) for getting server readiness with KServe API on HTTP Server Ready endpoint.
+See also [code samples](https://github.com/openvinotoolkit/model_server/tree/releases/2025/3/client/python/kserve-api/samples) for getting server readiness with KServe API on HTTP Server Ready endpoint.
 
-## Server Metadata API <a name="kfs-server-metadata"></a>
+## Server Metadata API
 **Description**
 
 Get information about the server.
@@ -103,9 +103,9 @@ $ curl http://localhost:5000/v2
 
 For detailed description of the response contents see [KServe API docs](https://github.com/kserve/kserve/blob/master/docs/predict-api/v2/required_api.md#server-metadata).
 
-See also [code samples](https://github.com/openvinotoolkit/model_server/tree/releases/2023/3/client/python/kserve-api/samples) for getting server metadata with KServe API on HTTP Server Metadata endpoint.
+See also [code samples](https://github.com/openvinotoolkit/model_server/tree/releases/2025/3/client/python/kserve-api/samples) for getting server metadata with KServe API on HTTP Server Metadata endpoint.
 
-## Model Ready API <a name="kfs-model-ready"></a>
+## Model Ready API
 **Description**
 
 Get information about model readiness.
@@ -130,11 +130,11 @@ Date: Tue, 09 Aug 2022 09:25:31 GMT
 Content-Length: 2
 ```
 
-See also [code samples](https://github.com/openvinotoolkit/model_server/tree/releases/2023/3/client/python/kserve-api/samples) for getting model readiness with KServe API on HTTP Model Ready endpoint.
+See also [code samples](https://github.com/openvinotoolkit/model_server/tree/releases/2025/3/client/python/kserve-api/samples) for getting model readiness with KServe API on HTTP Model Ready endpoint.
 
 
 
-## Model Metadata API <a name="model-metadata"></a>
+## Model Metadata API
 **Description**
 
 Get information about the model.
@@ -155,7 +155,8 @@ If successful:
   "versions" : [ $string, ... ] #optional,
   "platform" : $string,
   "inputs" : [ $metadata_tensor, ... ],
-  "outputs" : [ $metadata_tensor, ... ]
+  "outputs" : [ $metadata_tensor, ... ],
+  "rt_info" : { $model_info}
 }
 ```
 
@@ -168,6 +169,26 @@ $metadata_tensor =
   "shape" : [ $number, ... ]
 }
 ```
+`rt_info` is an optional response returned for the models in IR format which got an auxiliary metadata added during the export commands. For example the following code can include info about classification model labels:
+```python
+import openvino as ov
+core = ov.Core()
+model = core.read_model(model="model.xml")
+
+model.set_rt_info(["cat", "dog"],["model_info","labels"])
+ov.save_model(model,"new_model.xml")
+```
+Such deployed models will report:
+```json
+{
+"rt_info": {
+    "model_info": {
+      "labels": "cat dog"
+    }
+  }
+}
+```
+
 
 Else:
 ```JSON
@@ -185,9 +206,9 @@ $ curl http://localhost:8000/v2/models/resnet
 
 For detailed description of the response contents see [KServe API docs](https://github.com/kserve/kserve/blob/master/docs/predict-api/v2/required_api.md#model-metadata).
 
-See also [code samples](https://github.com/openvinotoolkit/model_server/tree/releases/2023/3/client/python/kserve-api/samples) for running getting model metadata with KServe API on HTTP Model Metadata endpoint.
+See also [code samples](https://github.com/openvinotoolkit/model_server/tree/releases/2025/3/client/python/kserve-api/samples) for running getting model metadata with KServe API on HTTP Model Metadata endpoint.
 
-## Inference API <a name="kfs-model-infer"></a>
+## Inference API
 **Description**
 
 Endpoint for running an inference with loaded models or [DAGs](./dag_scheduler.md).
@@ -205,7 +226,7 @@ POST http://${REST_URL}:${REST_PORT}/v2/models/${MODEL_NAME}[/versions/${MODEL_V
   "inputs" : [ $request_input, ... ],
   "outputs" : [ $request_output, ... ] #optional
 }
-``` 
+```
 
 where:
 ```JSON
@@ -229,7 +250,7 @@ $request_output =
 
 Besides numerical values, it is possible to pass encoded images using Binary Data extension:
 
-As a JPEG / PNG encoded images - in this case binary encoded data is loaded by OVMS using OpenCV which then converts it to OpenVINO-friendly data format for inference. Input is treated as encoded image when datatype is `BYTES` and model or pipeline have 4 (or 5 in case of [demultiplexing](demultiplexing.md)) shape dimensions. Every batch the BYTES input needs to be preceded by 4 bytes, litte endian, that contains its size. 
+As a JPEG / PNG encoded images - in this case binary encoded data is loaded by OVMS using OpenCV which then converts it to OpenVINO-friendly data format for inference. Input is treated as encoded image when datatype is `BYTES` and model or pipeline have 4 (or 5 in case of [demultiplexing](demultiplexing.md)) shape dimensions. Every batch the BYTES input needs to be preceded by 4 bytes, little endian, that contains its size.
 
 ```JSON
 Content-Type: application/octet-stream
@@ -249,7 +270,7 @@ Content-Length: <xx+9472>
 ```
 
 
-As a raw data - it means it wont be preprocessed by OVMS. To send raw data using Binary Data extension use other data types than `BYTES`.
+As a raw data - it means it won't be preprocessed by OVMS. To send raw data using Binary Data extension use other data types than `BYTES`.
 
 ```JSON
 Content-Type: application/octet-stream
@@ -269,9 +290,9 @@ Content-Length: <xx+(3 x 1080000)>
 <3240000 bytes of the whole data batch for model_input tensor>
 ```
 
-*sending strings inside binary extension also require preceding every batch by 4 bytes, litte endian, that contains its size.
+*sending strings inside binary extension also require preceding every batch by 4 bytes, little endian, that contains its size.
 
-Check [how binary data is handled in OpenVINO Model Server](./binary_input.md) for more informations.
+Check [how binary data is handled in OpenVINO Model Server](./binary_input.md) for more information.
 
 
 **Response Format**
@@ -348,8 +369,8 @@ Content-Length: <yy+16>
 
 For detailed description of request and response contents see [KServe API docs](https://github.com/kserve/kserve/blob/master/docs/predict-api/v2/required_api.md#inference).
 
-> Note: More efficient way of running inference via REST is sending data in a binary format outside of the JSON object, by using [binary data extension](./binary_input_kfs.md). 
+> Note: More efficient way of running inference via REST is sending data in a binary format outside of the JSON object, by using [binary data extension](./binary_input_kfs.md).
 
-> Note: Using //.. at the end of request URI results in truncated path, which might result in different response than expected. 
+> Note: Using //.. at the end of request URI results in truncated path, which might result in different response than expected.
 
-See also [code samples](https://github.com/openvinotoolkit/model_server/tree/releases/2023/3/client/python/kserve-api/samples) for running inference with KServe API on HTTP Inference endpoint.
+See also [code samples](https://github.com/openvinotoolkit/model_server/tree/releases/2025/3/client/python/kserve-api/samples) for running inference with KServe API on HTTP Inference endpoint.

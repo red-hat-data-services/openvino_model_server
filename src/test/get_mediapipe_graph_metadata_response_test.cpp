@@ -176,8 +176,10 @@ public:
     std::string cl_model_2_path;
 
     void SetUpSingleModel(std::string modelPath, std::string modelName) {
-        char* n_argv[] = {(char*)"ovms", (char*)"--model_path", (char*)modelPath.data(), (char*)"--model_name", (char*)modelName.data(), (char*)"--file_system_poll_wait_seconds", (char*)"0"};
-        int arg_count = 7;
+        std::string port{"9000"};
+        randomizeAndEnsureFree(port);
+        char* n_argv[] = {(char*)"ovms", (char*)"--model_path", (char*)modelPath.data(), (char*)"--model_name", (char*)modelName.data(), (char*)"--file_system_poll_wait_seconds", (char*)"0", (char*)"--port", (char*)port.c_str()};
+        int arg_count = 9;
         ovms::Config::instance().parse(arg_count, n_argv);
     }
 
@@ -185,7 +187,7 @@ public:
         const ::testing::TestInfo* const test_info =
             ::testing::UnitTest::GetInstance()->current_test_info();
 
-        cl_models_path = "/tmp/" + std::string(test_info->name());
+        cl_models_path = getGenericFullPathForTmp("/tmp/" + std::string(test_info->name()));
         cl_model_1_path = cl_models_path + "/model1/";
         cl_model_2_path = cl_models_path + "/model2/";
 
@@ -240,6 +242,15 @@ public:
     }
 };
 
+class TestEnabledConfig : public ovms::Config {
+public:
+    TestEnabledConfig() :
+        Config() {
+        std::string port{"9000"};
+        randomizeAndEnsureFree(port);
+        this->serverSettings.grpcPort = std::stoul(port);
+    }
+};
 TEST_F(TestImplGetModelStatus, NegativeKfsGetModelStatus) {
     // Create config file with an empty config & reload
     std::string configStr = dummy_config;
@@ -248,12 +259,13 @@ TEST_F(TestImplGetModelStatus, NegativeKfsGetModelStatus) {
     createConfigFileWithContent(configStr, fileToReload);
 
     // Copy dummy model to temporary destination
-    std::filesystem::copy("/ovms/src/test/dummy", cl_model_1_path, std::filesystem::copy_options::recursive);
+    std::filesystem::copy(getGenericFullPathForSrcTest("/ovms/src/test/dummy"), cl_model_1_path, std::filesystem::copy_options::recursive);
 
     ASSERT_EQ(manager.loadConfig(fileToReload), ovms::StatusCode::OK);
 
     KFSModelMetadataRequest req;
     KFSModelMetadataResponse res;
+    KFSModelExtraMetadata extraMetadata;
 
     req.Clear();
     req.set_name("dummy2");
@@ -262,7 +274,7 @@ TEST_F(TestImplGetModelStatus, NegativeKfsGetModelStatus) {
     std::unique_ptr<ServerShutdownGuard> serverGuard;
     ovms::Server& server = ovms::Server::instance();
     SetUpSingleModel(cl_models_path, "dummy");
-    auto& config = ovms::Config::instance();
+    TestEnabledConfig config;
     auto retCode = server.startModules(config);
     EXPECT_TRUE(retCode.ok()) << retCode.string();
     serverGuard = std::make_unique<ServerShutdownGuard>(server);
@@ -270,18 +282,29 @@ TEST_F(TestImplGetModelStatus, NegativeKfsGetModelStatus) {
     const ovms::Module* grpcModule = server.getModule(ovms::GRPC_SERVER_MODULE_NAME);
     KFSInferenceServiceImpl& impl = dynamic_cast<const ovms::GRPCServerModule*>(grpcModule)->getKFSGrpcImpl();
 
-    ASSERT_EQ(impl.ModelMetadataImpl(nullptr, &req, &res, ovms::ExecutionContext(ovms::ExecutionContext::Interface::GRPC, ovms::ExecutionContext::Method::GetModelMetadata)), StatusCode::MODEL_NAME_MISSING);
+    ASSERT_EQ(impl.ModelMetadataImpl(nullptr, &req, &res, ovms::ExecutionContext(ovms::ExecutionContext::Interface::GRPC, ovms::ExecutionContext::Method::GetModelMetadata), extraMetadata), StatusCode::MODEL_NAME_MISSING);
     req.Clear();
     req.set_name("dummy");
     req.set_version("2");
-    ASSERT_EQ(impl.ModelMetadataImpl(nullptr, &req, &res, ovms::ExecutionContext(ovms::ExecutionContext::Interface::GRPC, ovms::ExecutionContext::Method::GetModelMetadata)), StatusCode::MODEL_VERSION_MISSING);
+    ASSERT_EQ(impl.ModelMetadataImpl(nullptr, &req, &res, ovms::ExecutionContext(ovms::ExecutionContext::Interface::GRPC, ovms::ExecutionContext::Method::GetModelMetadata), extraMetadata), StatusCode::MODEL_VERSION_MISSING);
 
     req.Clear();
     req.set_name("dummy");
-    ASSERT_EQ(impl.ModelMetadataImpl(nullptr, &req, &res, ovms::ExecutionContext(ovms::ExecutionContext::Interface::GRPC, ovms::ExecutionContext::Method::GetModelMetadata)), StatusCode::MODEL_VERSION_MISSING);
+    ASSERT_EQ(impl.ModelMetadataImpl(nullptr, &req, &res, ovms::ExecutionContext(ovms::ExecutionContext::Interface::GRPC, ovms::ExecutionContext::Method::GetModelMetadata), extraMetadata), StatusCode::MODEL_VERSION_MISSING);
 
     req.Clear();
     req.set_name("dummy");
     req.set_version("$$");
-    ASSERT_EQ(impl.ModelMetadataImpl(nullptr, &req, &res, ovms::ExecutionContext(ovms::ExecutionContext::Interface::GRPC, ovms::ExecutionContext::Method::GetModelMetadata)), StatusCode::MODEL_VERSION_INVALID_FORMAT);
+    ASSERT_EQ(impl.ModelMetadataImpl(nullptr, &req, &res, ovms::ExecutionContext(ovms::ExecutionContext::Interface::GRPC, ovms::ExecutionContext::Method::GetModelMetadata), extraMetadata), StatusCode::MODEL_VERSION_INVALID_FORMAT);
+
+#ifdef _WIN32
+    // Unload model to allow folder delete on Windows
+    std::shared_ptr<ovms::ModelInstance> modelInstance1;
+    std::unique_ptr<ovms::ModelInstanceUnloadGuard> modelInstanceUnloadGuard;
+    manager.getModelInstance("dummy", 1, modelInstance1, modelInstanceUnloadGuard);
+    // Release guard
+    modelInstanceUnloadGuard.reset();
+    // Unload model
+    modelInstance1->retireModel();
+#endif
 }

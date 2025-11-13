@@ -122,7 +122,7 @@ std::string NodeSessionMetadata::getSessionKey(const std::set<std::string>& igno
 
 std::pair<NodeSessionMetadata, CollapseDetails> NodeSessionMetadata::getCollapsedSessionMetadata(const std::set<std::string>& ignoredNodeNames) const {
     if (ignoredNodeNames.size() == 0) {
-        SPDLOG_LOGGER_ERROR(dag_executor_logger, "Tried to collapse subsession with emtpy set");
+        SPDLOG_LOGGER_ERROR(dag_executor_logger, "Tried to collapse subsession with empty set");
         throw std::logic_error("Tried to collapse sessions with empty set");
     }
     if (std::any_of(
@@ -188,7 +188,7 @@ session_id_t NodeSessionMetadata::getShardId(const std::set<std::string>& collap
                 std::accumulate(collapsedNames.begin(),
                     collapsedNames.end(),
                     std::string(),
-                    [](const std::string& lhs, const std::string rhs) {
+                    [](const std::string& lhs, const std::string& rhs) {
                         if (lhs.empty()) {
                             return rhs;
                         }
@@ -197,7 +197,7 @@ session_id_t NodeSessionMetadata::getShardId(const std::set<std::string>& collap
                 std::accumulate(sessionsLevels.begin(),
                     sessionsLevels.end(),
                     std::string(),
-                    [](const std::string& lhs, const std::string rhs) {
+                    [](const std::string& lhs, const std::string& rhs) {
                         if (lhs.empty()) {
                             return rhs;
                         }

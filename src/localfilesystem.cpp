@@ -20,7 +20,7 @@
 #include <string>
 #include <vector>
 
-#include <spdlog/spdlog.h>
+#include "logging.hpp"
 
 #if defined(__APPLE__) || defined(__NetBSD__)
 #define st_mtim st_mtimespec
@@ -34,14 +34,18 @@ constexpr uint64_t NANOS_PER_SECOND = 1000000000;
 const std::vector<std::string> FileSystem::acceptedFiles = {".bin", ".onnx", ".xml", "mapping_config.json", ".pdiparams", ".pdmodel", ".pb", ".tflite"};
 
 StatusCode LocalFileSystem::fileExists(const std::string& path, bool* exists) {
+    return LocalFileSystem::exists(path, exists).getCode();
+}
+
+Status LocalFileSystem::exists(const std::string& path, bool* exists) {
     try {
         if (isPathEscaped(path)) {
-            SPDLOG_ERROR("Path {} escape with .. is forbidden.", path);
+            SPDLOG_LOGGER_ERROR(modelmanager_logger, "Path {} escape with .. is forbidden.", path);
             return StatusCode::PATH_INVALID;
         }
         *exists = fs::exists(path);
     } catch (fs::filesystem_error& e) {
-        SPDLOG_DEBUG("Couldn't access path {}", e.what());
+        SPDLOG_LOGGER_DEBUG(modelmanager_logger, "Couldn't access path {}", e.what());
         return StatusCode::PATH_INVALID;
     }
 
@@ -49,14 +53,18 @@ StatusCode LocalFileSystem::fileExists(const std::string& path, bool* exists) {
 }
 
 StatusCode LocalFileSystem::isDirectory(const std::string& path, bool* is_dir) {
+    return LocalFileSystem::isDir(path, is_dir).getCode();
+}
+
+Status LocalFileSystem::isDir(const std::string& path, bool* is_dir) {
     try {
         if (isPathEscaped(path)) {
-            SPDLOG_ERROR("Path {} escape with .. is forbidden.", path);
+            SPDLOG_LOGGER_ERROR(modelmanager_logger, "Path {} escape with .. is forbidden.", path);
             return StatusCode::PATH_INVALID;
         }
         *is_dir = fs::is_directory(path);
     } catch (fs::filesystem_error& e) {
-        SPDLOG_DEBUG("Couldn't access path {}", e.what());
+        SPDLOG_LOGGER_DEBUG(modelmanager_logger, "Couldn't access path {}", e.what());
         return StatusCode::PATH_INVALID;
     }
 
@@ -66,14 +74,14 @@ StatusCode LocalFileSystem::isDirectory(const std::string& path, bool* is_dir) {
 StatusCode LocalFileSystem::getDirectoryContents(const std::string& path, files_list_t* contents) {
     try {
         if (isPathEscaped(path)) {
-            SPDLOG_ERROR("Path {} escape with .. is forbidden.", path);
+            SPDLOG_LOGGER_ERROR(modelmanager_logger, "Path {} escape with .. is forbidden.", path);
             return StatusCode::PATH_INVALID;
         }
         for (const auto& entry : fs::directory_iterator(path)) {
             contents->insert(entry.path().string());
         }
     } catch (fs::filesystem_error& e) {
-        SPDLOG_DEBUG("Couldn't access path {}", e.what());
+        SPDLOG_LOGGER_DEBUG(modelmanager_logger, "Couldn't access path {}", e.what());
         return StatusCode::PATH_INVALID;
     }
 
@@ -83,7 +91,7 @@ StatusCode LocalFileSystem::getDirectoryContents(const std::string& path, files_
 StatusCode LocalFileSystem::getDirectorySubdirs(const std::string& path, files_list_t* subdirs) {
     try {
         if (isPathEscaped(path)) {
-            SPDLOG_ERROR("Path {} escape with .. is forbidden.", path);
+            SPDLOG_LOGGER_ERROR(modelmanager_logger, "Path {} escape with .. is forbidden.", path);
             return StatusCode::PATH_INVALID;
         }
         for (const auto& entry : fs::directory_iterator(path)) {
@@ -92,7 +100,7 @@ StatusCode LocalFileSystem::getDirectorySubdirs(const std::string& path, files_l
             }
         }
     } catch (fs::filesystem_error& e) {
-        SPDLOG_DEBUG("Couldn't access path {}", e.what());
+        SPDLOG_LOGGER_DEBUG(modelmanager_logger, "Couldn't access path {}", e.what());
         return StatusCode::PATH_INVALID;
     }
 
@@ -102,7 +110,7 @@ StatusCode LocalFileSystem::getDirectorySubdirs(const std::string& path, files_l
 StatusCode LocalFileSystem::getDirectoryFiles(const std::string& path, files_list_t* files) {
     try {
         if (isPathEscaped(path)) {
-            SPDLOG_ERROR("Path {} escape with .. is forbidden.", path);
+            SPDLOG_LOGGER_ERROR(modelmanager_logger, "Path {} escape with .. is forbidden.", path);
             return StatusCode::PATH_INVALID;
         }
         for (const auto& entry : fs::directory_iterator(path)) {
@@ -111,7 +119,7 @@ StatusCode LocalFileSystem::getDirectoryFiles(const std::string& path, files_lis
             }
         }
     } catch (fs::filesystem_error& e) {
-        SPDLOG_DEBUG("Couldn't access path {}", e.what());
+        SPDLOG_LOGGER_DEBUG(modelmanager_logger, "Couldn't access path {}", e.what());
         return StatusCode::PATH_INVALID;
     }
 
@@ -120,12 +128,12 @@ StatusCode LocalFileSystem::getDirectoryFiles(const std::string& path, files_lis
 
 StatusCode LocalFileSystem::readTextFile(const std::string& path, std::string* contents) {
     if (isPathEscaped(path)) {
-        SPDLOG_ERROR("Path {} escape with .. is forbidden.", path);
+        SPDLOG_LOGGER_ERROR(modelmanager_logger, "Path {} escape with .. is forbidden.", path);
         return StatusCode::PATH_INVALID;
     }
     std::ifstream input(path, std::ios::in | std::ios::binary);
     if (!input) {
-        SPDLOG_DEBUG("Couldn't access path {}", path);
+        SPDLOG_LOGGER_DEBUG(modelmanager_logger, "Couldn't access path {}", path);
         return StatusCode::PATH_INVALID;
     }
 
@@ -155,7 +163,7 @@ StatusCode LocalFileSystem::deleteFileFolder(const std::string& path) {
     std::filesystem::path p = path;
     std::filesystem::path parentPath = p.parent_path();
     if (isPathEscaped(path)) {
-        SPDLOG_ERROR("Path {} escape with .. is forbidden.", path);
+        SPDLOG_LOGGER_ERROR(modelmanager_logger, "Path {} escape with .. is forbidden.", path);
         return StatusCode::PATH_INVALID;
     }
     if (!std::filesystem::remove_all(path, errorCode)) {
@@ -163,7 +171,7 @@ StatusCode LocalFileSystem::deleteFileFolder(const std::string& path) {
     }
     // delete empty folder with model version
     if (std::filesystem::is_empty(parentPath)) {
-        SPDLOG_DEBUG("Deleting empty folder: ()", parentPath.string());
+        SPDLOG_LOGGER_DEBUG(modelmanager_logger, "Deleting empty folder: {}", parentPath.string());
         std::filesystem::remove(parentPath);
     }
 

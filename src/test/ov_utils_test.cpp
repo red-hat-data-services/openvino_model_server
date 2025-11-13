@@ -22,6 +22,7 @@
 #include "../filesystem.hpp"
 #include "../modelinstance.hpp"
 #include "../ov_utils.hpp"
+#include "test_utils.hpp"
 
 using testing::ElementsAre;
 
@@ -99,6 +100,35 @@ TEST(OVUtils, CopyTensor) {
     EXPECT_NE(originalTensor.data(), copyTensor.data());
 }
 
+TEST(OVUtils, CloneStringTensor) {
+    const auto elementType = ov::element::Type(ov::element::Type_t::string);
+
+    std::vector<std::string> data{"abc", "", "defgh"};
+
+    ov::Shape shape{data.size()};
+    ov::Tensor originalTensor(elementType, shape, &data[0]);
+    ov::Tensor copyTensor;
+
+    ASSERT_EQ(ovms::tensorClone(copyTensor, originalTensor), ovms::StatusCode::OK);
+
+    ASSERT_EQ(originalTensor.get_shape(), shape);
+    ASSERT_EQ(copyTensor.get_shape(), shape);
+
+    ASSERT_EQ(originalTensor.get_element_type(), elementType);
+    ASSERT_EQ(copyTensor.get_element_type(), elementType);
+
+    ASSERT_EQ(originalTensor.get_byte_size(), copyTensor.get_byte_size());
+
+    ASSERT_EQ(copyTensor.get_strides(), originalTensor.get_strides());
+
+    std::string* actualData = copyTensor.data<std::string>();
+    std::string* originalData = originalTensor.data<std::string>();
+    for (size_t i = 0; i < data.size(); i++) {
+        EXPECT_EQ(actualData[i], originalData[i]);
+        EXPECT_NE(actualData[i].data(), originalData[i].data());
+    }
+}
+
 TEST(OVUtils, ConstCopyTensor) {
     const std::vector<size_t> shape{2, 3, 4, 5};
     const auto elementType = ov::element::Type(ov::element::Type_t::f32);
@@ -174,6 +204,17 @@ TEST(OVUtils, ValidatePluginConfigurationPositive) {
     EXPECT_TRUE(status.ok());
 }
 
+TEST(OVUtils, ValidatePluginConfigurationPositiveBatch) {
+    ov::Core ieCore;
+    std::shared_ptr<ov::Model> model = ieCore.read_model(std::filesystem::current_path().u8string() + "/src/test/dummy/1/dummy.xml");
+    ovms::ModelConfig config;
+    config.setTargetDevice("BATCH:CPU(4)");
+    config.setPluginConfig({{"AUTO_BATCH_TIMEOUT", 10}});
+    ovms::plugin_config_t supportedPluginConfig = ovms::ModelInstance::prepareDefaultPluginConfig(config);
+    auto status = ovms::validatePluginConfiguration(supportedPluginConfig, "BATCH:CPU(4)", ieCore);
+    EXPECT_TRUE(status.ok());
+}
+
 TEST(OVUtils, ValidatePluginConfigurationNegative) {
     ov::Core ieCore;
     std::shared_ptr<ov::Model> model = ieCore.read_model(std::filesystem::current_path().u8string() + "/src/test/dummy/1/dummy.xml");
@@ -183,4 +224,17 @@ TEST(OVUtils, ValidatePluginConfigurationNegative) {
     ovms::plugin_config_t unsupportedPluginConfig = ovms::ModelInstance::prepareDefaultPluginConfig(config);
     auto status = ovms::validatePluginConfiguration(unsupportedPluginConfig, "CPU", ieCore);
     EXPECT_FALSE(status.ok());
+}
+
+// Multi stage (read_model & compile_model time) plugin config
+TEST(OVUtils, ValidatePluginConfigurationAllowEnableMmap) {
+    ov::Core ieCore;
+    ovms::ModelConfig config;
+    config.setTargetDevice("CPU");
+    adjustConfigToAllowModelFileRemovalWhenLoaded(config);
+    ovms::plugin_config_t pluginConfig = ovms::ModelInstance::prepareDefaultPluginConfig(config);
+    auto status = ovms::validatePluginConfiguration(pluginConfig, "CPU", ieCore);
+    EXPECT_TRUE(status.ok());
+    auto model = ieCore.read_model(std::filesystem::current_path().u8string() + "/src/test/dummy/1/dummy.xml", {}, pluginConfig);
+    auto compiledModel = ieCore.compile_model(model, "CPU", pluginConfig);
 }

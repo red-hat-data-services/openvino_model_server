@@ -23,6 +23,9 @@
 #include "../dags/pipeline_factory.hpp"
 #include "../dags/pipelinedefinition.hpp"
 #include "../get_model_metadata_impl.hpp"
+#if (MEDIAPIPE_DISABLE == 0)
+#include "../kfs_frontend/kfs_graph_executor_impl.hpp"
+#endif
 #include "../kfs_frontend/kfs_utils.hpp"
 #include "../localfilesystem.hpp"
 #include "../logging.hpp"
@@ -126,18 +129,16 @@ static const char* stressPipelineCustomNodeDifferentOperationsThenDummyThenChoos
 #if (MEDIAPIPE_DISABLE == 0)
 template <>
 void mediaexec<KFSRequest, KFSResponse>(std::shared_ptr<MediapipeGraphExecutor>& executorPtr, ovms::ModelManager& manager, KFSRequest& request, KFSResponse& response, ovms::Status& status) {
-    ServableMetricReporter* ptr{nullptr};
     status = executorPtr->infer(&request,
         &response,
         ovms::ExecutionContext(
             ovms::ExecutionContext::Interface::GRPC,
-            ovms::ExecutionContext::Method::Predict),
-        ptr);
+            ovms::ExecutionContext::Method::Predict));
 }
 
 template <>
 void mediacreate<KFSRequest, KFSResponse>(std::shared_ptr<MediapipeGraphExecutor>& executorPtr, ovms::ModelManager& manager, KFSRequest& request, KFSResponse& response, ovms::Status& status) {
-    status = manager.createPipeline(executorPtr, request.model_name(), &request, &response);
+    status = manager.createPipeline(executorPtr, request.model_name());
 }
 #endif
 
@@ -180,7 +181,12 @@ TEST_F(StressPipelineConfigChanges, KFSAddNewVersionDuringPredictLoad) {
         requiredLoadResults,
         allowedLoadResults);
 }
+// Disabled because we cannot start http server multiple times https://github.com/drogonframework/drogon/issues/2210
+#if (USE_DROGON == 0)
 TEST_F(ConfigChangeStressTest, GetMetricsDuringLoad) {
+#else
+TEST_F(ConfigChangeStressTest, DISABLED_GetMetricsDuringLoad) {
+#endif
     bool performWholeConfigReload = false;                        // we just need to have all model versions rechecked
     std::set<StatusCode> requiredLoadResults = {StatusCode::OK};  // we expect full continuity of operation
     std::set<StatusCode> allowedLoadResults = {};
@@ -194,9 +200,10 @@ TEST_F(ConfigChangeStressTest, GetMetricsDuringLoad) {
 TEST_F(StressPipelineConfigChanges, RemoveDefaultVersionDuringPredictLoad) {
     std::set<StatusCode> requiredLoadResults = {StatusCode::OK,
         StatusCode::PIPELINE_DEFINITION_NOT_LOADED_YET,  // we hit when all config changes finish to propagate
-        StatusCode::MODEL_VERSION_NOT_LOADED_ANYMORE,    // we hit default version which is unloaded already but default is not changed yet
         StatusCode::MODEL_VERSION_MISSING};              // there is no default version since all are either not loaded properly or retired
-    std::set<StatusCode> allowedLoadResults = {};
+    std::set<StatusCode> allowedLoadResults = {
+        StatusCode::MODEL_VERSION_NOT_LOADED_ANYMORE,  // we hit default version which is unloaded already but default is not changed yet
+    };
     // we need whole config reload since there is no other way to dispose
     // all model versions different than removing model from config
     bool performWholeConfigReload = true;
@@ -641,9 +648,12 @@ TEST_F(StressMediapipeChanges, RemoveModelDuringPredictLoad) {
     // we add another definition during load
     SetUpConfig(basicMediapipeConfig);
     bool performWholeConfigReload = true;
-    std::set<StatusCode> requiredLoadResults = {StatusCode::OK,  // we expect full continuity of operation
-        StatusCode::MEDIAPIPE_EXECUTION_ERROR};                  // we expect to stop creating pipelines
+    std::set<StatusCode> requiredLoadResults = {
+        StatusCode::OK,  // we expect full continuity of operation
+        StatusCode::MEDIAPIPE_PRECONDITION_FAILED,
+    };  // we expect to stop creating pipelines
     std::set<StatusCode> allowedLoadResults = {
+        StatusCode::MEDIAPIPE_EXECUTION_ERROR,
         StatusCode::MEDIAPIPE_GRAPH_ADD_PACKET_INPUT_STREAM,  // Can happen when OVMSSessionCalculator fails to create side input packet
     };
     performStressTest(

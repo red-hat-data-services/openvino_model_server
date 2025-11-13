@@ -19,23 +19,31 @@
 #include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <thread>
+#include <unordered_set>
 #include <utility>
 
+// TODO windows
+#ifdef __linux__
 #include <dirent.h>
+#endif
 #include <malloc.h>
 #include <openvino/runtime/compiled_model.hpp>
-#include <spdlog/spdlog.h>
+// TODO windows
+#ifdef __linux__
+#include <openvino/runtime/intel_gpu/ocl/ocl.hpp>
+#endif
+#include <openvino/runtime/remote_tensor.hpp>
 #include <sys/types.h>
 
-#include "capi_frontend/inferencerequest.hpp"
-#include "capi_frontend/inferenceresponse.hpp"
+#include "anonymous_input_name.hpp"
+#include "cleaner_utils.hpp"
 #include "config.hpp"
 #include "customloaderinterface.hpp"
 #include "customloaders.hpp"
-#include "deserialization.hpp"
 #include "executingstreamidguard.hpp"
 #include "filesystem.hpp"
 #include "layout.hpp"
@@ -45,15 +53,18 @@
 #include "modelconfig.hpp"
 #include "modelinstanceunloadguard.hpp"
 #include "ov_utils.hpp"
-#include "predict_request_validation_utils.hpp"
-#include "prediction_service_utils.hpp"
 #include "profiler.hpp"
-#include "serialization.hpp"
+#include "regularovtensorfactory.hpp"
 #include "shape.hpp"
 #include "status.hpp"
 #include "stringutils.hpp"
 #include "tensorinfo.hpp"
 #include "timer.hpp"
+// TODO windows
+#ifdef __linux__
+#include "opencltensorfactory.hpp"
+#include "vaapitensorfactory.hpp"
+#endif
 
 namespace {
 enum : unsigned int {
@@ -67,35 +78,44 @@ enum : unsigned int {
 };
 }  // namespace
 
+namespace ov {
+class Meta;  // pure fwd declaration in getRTInfo
+}
+
 namespace ovms {
 
-const uint MAX_NIREQ_COUNT = 100000;
+// TODO windows
+#ifdef __linux__
+void* globalVaDisplay = nullptr;
+#endif
 
-const uint UNLOAD_AVAILABILITY_CHECKING_INTERVAL_MILLISECONDS = 10;
+const uint32_t MAX_NIREQ_COUNT = 100000;
+const uint32_t UNLOAD_AVAILABILITY_CHECKING_INTERVAL_MILLISECONDS = 10;
 
-ModelInstance::~ModelInstance() = default;
+ModelInstance::~ModelInstance() {
+    retireModel();
+}
 ModelInstance::ModelInstance(const std::string& name, model_version_t version, ov::Core& ieCore, MetricRegistry* registry, const MetricConfig* metricConfig) :
+    Servable(name, version),
     ieCore(ieCore),
-    name(name),
-    version(version),
     subscriptionManager(std::string("model: ") + name + std::string(" version: ") + std::to_string(version)),
     status(name, version),
     reporter(std::make_unique<ModelMetricReporter>(metricConfig, registry, name, version)) {
     isCustomLoaderConfigChanged = false;
 }
 
-void ModelInstance::subscribe(PipelineDefinition& pd) {
+void ModelInstance::subscribe(NotifyReceiver& pd) {
     subscriptionManager.subscribe(pd);
 }
 
-void ModelInstance::unsubscribe(PipelineDefinition& pd) {
+void ModelInstance::unsubscribe(NotifyReceiver& pd) {
     subscriptionManager.unsubscribe(pd);
 }
 
 static Status getRequestedShape(const ModelConfig& config, const DynamicModelParameter& parameter, const std::string& name, Shape& shapeOut) {
     Shape shape;
     auto mappedName = config.getMappingInputByKey(name);
-    auto inputNameToUse = (mappedName != "" ? mappedName : name);
+    const auto& inputNameToUse = (mappedName != "" ? mappedName : name);
     if (config.getBatchSize().has_value() || parameter.isBatchSizeRequested()) {
         // leave shape untouched
     } else if (config.isShapeAuto(inputNameToUse) && parameter.isShapeRequested(inputNameToUse)) {
@@ -108,7 +128,7 @@ static Status getRequestedShape(const ModelConfig& config, const DynamicModelPar
     } else if (config.getShapes().count(ANONYMOUS_INPUT_NAME) && config.getShapes().at(ANONYMOUS_INPUT_NAME).shape.size()) {
         shape = config.getShapes().at(ANONYMOUS_INPUT_NAME).shape;
     }
-    shapeOut = shape;
+    shapeOut = std::move(shape);
     return StatusCode::OK;
 }
 
@@ -116,7 +136,7 @@ static bool hasInputWithName(std::shared_ptr<ov::Model>& model, const std::strin
     try {
         model->input(name);
         return true;
-    } catch (ov::Exception& e) {
+    } catch (ov::Exception&) {
         return false;
     }
 }
@@ -125,7 +145,7 @@ static bool hasOutputWithName(std::shared_ptr<ov::Model>& model, const std::stri
     try {
         model->output(name);
         return true;
-    } catch (ov::Exception& e) {
+    } catch (ov::Exception&) {
         return false;
     }
 }
@@ -249,7 +269,7 @@ static Status applyLayoutConfiguration(const ModelConfig& config, std::shared_pt
             } else {
                 OV_LOGGER("input: {}, input.get_rt_info()", reinterpret_cast<const void*>(&input));
                 auto inheritedModelLayout = getLayoutFromRTMap(input.get_rt_info());
-                auto guessedModelLayout = Layout::getDefaultLayout(input.get_partial_shape().size());
+                const auto& guessedModelLayout = Layout::getDefaultLayout(input.get_partial_shape().size());
 
                 ov::Layout targetModelLayout = inheritedModelLayout.has_value() ? inheritedModelLayout.value() : ov::Layout(guessedModelLayout);
 
@@ -302,7 +322,7 @@ static Status applyLayoutConfiguration(const ModelConfig& config, std::shared_pt
             } else {
                 OV_LOGGER("output: {}, output.get_rt_info()", reinterpret_cast<const void*>(&output));
                 auto inheritedModelLayout = getLayoutFromRTMap(output.get_rt_info());
-                auto guessedModelLayout = Layout::getDefaultLayout(output.get_partial_shape().size());
+                const auto& guessedModelLayout = Layout::getDefaultLayout(output.get_partial_shape().size());
 
                 ov::Layout targetModelLayout = inheritedModelLayout.has_value() ? inheritedModelLayout.value() : ov::Layout(guessedModelLayout);
 
@@ -337,29 +357,88 @@ static Status applyLayoutConfiguration(const ModelConfig& config, std::shared_pt
     try {
         OV_LOGGER("preproc: {}, ov::Model = ov::preprocess::PrePostProcessor::build()", reinterpret_cast<void*>(&preproc));
         model = preproc.build();
-    } catch (std::exception& e) {
+    } catch (std::exception&) {
         SPDLOG_LOGGER_ERROR(modelmanager_logger, "Cannot change layout");
         return StatusCode::MODEL_NOT_LOADED;
     }
     return StatusCode::OK;
 }
 
-const std::string RT_INFO_KEY{"model_info"};
-
-ov::AnyMap ModelInstance::getRTInfo() const {
-    OV_LOGGER("model: {}, ov::Model::has_rt_info({})", reinterpret_cast<void*>(model.get()), RT_INFO_KEY);
-    if (this->model->has_rt_info(RT_INFO_KEY)) {
-        OV_LOGGER("model: {}, ov::Model::get_rt_info<ov::AnyMap>({})", reinterpret_cast<void*>(model.get()), RT_INFO_KEY);
-        return model->get_rt_info<ov::AnyMap>(RT_INFO_KEY);
+ov::AnyMap ModelInstance::getRTInfo(std::vector<std::string> path) {
+    ov::AnyMap anyMap, rtMap;
+    try {
+        rtMap = model->get_rt_info<ov::AnyMap>(path);
+    } catch (const ov::Exception& e) {
+        SPDLOG_LOGGER_DEBUG(modelmanager_logger, "Failed to get RTInfo; error:{}", e.what());
+        return anyMap;
+    } catch (...) {
+        SPDLOG_LOGGER_DEBUG(modelmanager_logger, "Failed to get RTInfo for path; unknown error");
+        return anyMap;
     }
-    OV_LOGGER("ov::AnyMap()");
-    return ov::AnyMap();
+    for (const auto& [key, value] : rtMap) {
+        if ((typeid(std::shared_ptr<ov::Meta>) == value.type_info())) {
+            path.push_back(key);
+            anyMap[key] = getRTInfo(path);
+            path.pop_back();
+        } else {
+            anyMap[key] = value;
+        }
+    }
+    return anyMap;
+}
+
+ov::AnyMap ModelInstance::getRTInfo() {
+    OV_LOGGER("model: {}, ov::Model::get_rt_info<ov::AnyMap>()", reinterpret_cast<void*>(model.get()));
+    ov::AnyMap rtMap = this->model->get_rt_info();
+    ov::AnyMap anyMap;
+    std::vector<std::string> path{};
+    for (const auto& [key, value] : rtMap) {
+        if ((typeid(std::shared_ptr<ov::Meta>) == value.type_info())) {
+            path.push_back(key);
+            anyMap[key] = getRTInfo(path);
+            path.pop_back();
+        } else {
+            anyMap[key] = value;
+        }
+    }
+    return anyMap;
+}
+
+Status ModelInstance::adjustForEmptyOutputNames() {
+    size_t outputIndex = 0;
+    for (ov::Output<ov::Node>& output : this->model->outputs()) {
+        try {
+            OV_LOGGER("ov::Output<ov::Node> output: {}, output.get_any_name()", reinterpret_cast<const void*>(&output));
+            if (output.get_names().size() == 0) {
+                std::unordered_set<std::string> dummy_name{"out_" + std::to_string(outputIndex)};
+                output.add_names(dummy_name);
+            }
+        } catch (const ov::Exception& e) {
+            SPDLOG_LOGGER_ERROR(modelmanager_logger, "Failed to set the missing name in output for model:{}; version:{}; Error:{}",
+                getName(),
+                getVersion(),
+                e.what());
+            return StatusCode::UNKNOWN_ERROR;
+        } catch (...) {
+            SPDLOG_LOGGER_ERROR(modelmanager_logger, "Failed to set the missing name in output for model:{}; version:{};",
+                getName(),
+                getVersion());
+            return StatusCode::UNKNOWN_ERROR;
+        }
+        outputIndex++;
+    }
+    return StatusCode::OK;
 }
 
 Status ModelInstance::loadTensors(const ModelConfig& config, bool needsToApplyLayoutConfiguration, const DynamicModelParameter& parameter) {
     Status status = validateConfigurationAgainstNetwork(config, this->model);
     if (!status.ok()) {
         SPDLOG_LOGGER_ERROR(modelmanager_logger, "Error during configuration validation against model");
+        return status;
+    }
+    status = adjustForEmptyOutputNames();
+    if (!status.ok()) {
+        SPDLOG_LOGGER_ERROR(modelmanager_logger, "Error during adjusting output names");
         return status;
     }
     if (needsToApplyLayoutConfiguration) {
@@ -385,7 +464,6 @@ Status ModelInstance::loadTensors(const ModelConfig& config, bool needsToApplyLa
 Status ModelInstance::gatherReshapeInfo(bool isBatchingModeAuto, const DynamicModelParameter& parameter, bool& isReshapeRequired, std::map<std::string, ov::PartialShape>& modelShapes) {
     OV_LOGGER("ov::Model: {}, model->inputs()", reinterpret_cast<void*>(model.get()));
     for (const ov::Output<ov::Node>& input : this->model->inputs()) {
-        std::string name;
         try {
             OV_LOGGER("ov::Output<ov::Node> input: {}, input.get_any_name()", reinterpret_cast<const void*>(&input));
             std::string name = input.get_any_name();
@@ -431,6 +509,16 @@ Status ModelInstance::gatherReshapeInfo(bool isBatchingModeAuto, const DynamicMo
 }
 
 Status ModelInstance::loadInputTensors(const ModelConfig& config, const DynamicModelParameter& parameter) {
+    auto status = loadInputTensorsImpl(config, parameter);
+    if (!status.ok())
+        return status;
+    if (this->inputsInfo.empty()) {
+        SPDLOG_LOGGER_ERROR(modelmanager_logger, "Tried to load model:{}, version: {} with no inputs", getName(), getVersion());
+        return StatusCode::OV_NO_INPUTS;
+    }
+    return status;
+}
+Status ModelInstance::loadInputTensorsImpl(const ModelConfig& config, const DynamicModelParameter& parameter) {
     this->inputsInfo.clear();
 
     std::map<std::string, ov::PartialShape> modelShapes;
@@ -461,7 +549,22 @@ Status ModelInstance::loadInputTensors(const ModelConfig& config, const DynamicM
         SPDLOG_DEBUG("model: {}, version: {}; reshaping inputs is not required", getName(), getVersion());
     }
     configureBatchSize(this->config, parameter);
-
+// TODO windows
+#ifdef __linux__
+    if (globalVaDisplay) {
+        SPDLOG_DEBUG("Adding va preproc");
+        ov::preprocess::PrePostProcessor ppp(this->model);
+        // https://docs.openvino.ai/latest/openvino_docs_OV_UG_supported_plugins_GPU_RemoteTensor_API.html#direct-nv12-video-surface-input
+        ppp.input()
+            .tensor()
+            .set_element_type(ov::element::u8)
+            .set_color_format(ov::preprocess::ColorFormat::NV12_TWO_PLANES, {"y", "uv"})
+            .set_memory_type(ov::intel_gpu::memory_type::surface);
+        ppp.input().preprocess().convert_color(ov::preprocess::ColorFormat::BGR);
+        ppp.input().model().set_layout("NCHW");
+        this->model = ppp.build();
+    }
+#endif
     OV_LOGGER("ov::Model: {}, model->inputs()", reinterpret_cast<void*>(model.get()));
     for (const ov::Output<ov::Node>& input : this->model->inputs()) {
         try {
@@ -512,6 +615,17 @@ Status ModelInstance::loadInputTensors(const ModelConfig& config, const DynamicM
 }
 
 Status ModelInstance::loadOutputTensors(const ModelConfig& config) {
+    auto status = loadOutputTensorsImpl(config);
+    if (!status.ok())
+        return status;
+    if (this->outputsInfo.empty()) {
+        SPDLOG_LOGGER_ERROR(modelmanager_logger, "Tried to load model:{}, version: {} with no outputs", getName(), getVersion());
+        return StatusCode::OV_NO_OUTPUTS;
+    }
+    return status;
+}
+
+Status ModelInstance::loadOutputTensorsImpl(const ModelConfig& config) {
     this->outputsInfo.clear();
 
     OV_LOGGER("ov::Model model: {}, model->outputs()", reinterpret_cast<void*>(model.get()));
@@ -561,59 +675,15 @@ Status ModelInstance::loadOutputTensors(const ModelConfig& config) {
             return StatusCode::UNKNOWN_ERROR;
         }
     }
-
     return StatusCode::OK;
 }
 
-// Temporary methods. To be replaces with proper storage class.
-static bool dirExists(const std::string& path) {
-    if (FileSystem::isPathEscaped(path)) {
-        SPDLOG_ERROR("Path {} escape with .. is forbidden.", path);
-        return false;
-    }
-    DIR* dir = opendir(path.c_str());
-    if (dir) {
-        closedir(dir);
-        return true;
-    }
-
-    return false;
-}
-
-static std::string findFilePathWithExtension(const std::string& path, const std::string& extension) {
-    struct dirent* entry;
-    if (FileSystem::isPathEscaped(path)) {
-        SPDLOG_ERROR("Path {} escape with .. is forbidden.", path);
-        return std::string();
-    }
-    DIR* dir = opendir(path.c_str());
-    if (!dir) {
-        SPDLOG_WARN("Failed to opendir: {}", path);
-        return std::string();
-    }
-
-    while ((entry = readdir(dir)) != nullptr) {
-        auto name = std::string(entry->d_name);
-        if (endsWith(name, extension)) {
-            closedir(dir);
-            if (endsWith(name, "/")) {
-                return path + name;
-            } else {
-                return path + '/' + name;
-            }
-        }
-    }
-    closedir(dir);
-
-    return std::string();
-}
-
 std::string ModelInstance::findModelFilePathWithExtension(const std::string& extension) const {
-    return findFilePathWithExtension(path, extension);
+    return FileSystem::findFilePathWithExtension(path, extension);
 }
 
-uint ModelInstance::getNumOfParallelInferRequestsUnbounded(const ModelConfig& modelConfig) {
-    uint numberOfParallelInferRequests = 0;
+uint32_t ModelInstance::getNumOfParallelInferRequestsUnbounded(const ModelConfig& modelConfig) {
+    uint32_t numberOfParallelInferRequests = 0;
     if (modelConfig.getNireq() > 0) {
         return modelConfig.getNireq();
     }
@@ -631,8 +701,8 @@ uint ModelInstance::getNumOfParallelInferRequestsUnbounded(const ModelConfig& mo
     return numberOfParallelInferRequests;
 }
 
-uint ModelInstance::getNumOfParallelInferRequests(const ModelConfig& modelConfig) {
-    uint nireq = getNumOfParallelInferRequestsUnbounded(modelConfig);
+uint32_t ModelInstance::getNumOfParallelInferRequests(const ModelConfig& modelConfig) {
+    uint32_t nireq = getNumOfParallelInferRequestsUnbounded(modelConfig);
     if (nireq > MAX_NIREQ_COUNT) {
         SPDLOG_WARN("Invalid nireq because its value was too high: {}. Maximum value: {}", nireq, MAX_NIREQ_COUNT);
         return 0;
@@ -645,7 +715,8 @@ uint ModelInstance::getNumOfParallelInferRequests(const ModelConfig& modelConfig
 
 std::shared_ptr<ov::Model> ModelInstance::loadOVModelPtr(const std::string& modelFile) {
     OV_LOGGER("ov::Core: {}, model = ieCore.read_model(\"{}\")", reinterpret_cast<const void*>(&this->ieCore), modelFile);
-    return this->ieCore.read_model(modelFile);
+    plugin_config_t pluginConfig = prepareDefaultPluginConfig(this->config);
+    return this->ieCore.read_model(modelFile, {}, pluginConfig);
 }
 
 Status ModelInstance::loadOVModel() {
@@ -675,7 +746,7 @@ Status ModelInstance::loadOVModelUsingCustomLoader() {
         auto customLoaderInterfacePtr = customloaders.find(loaderName);
         if (customLoaderInterfacePtr == nullptr) {
             SPDLOG_INFO("Loader {} is not in loaded customloaders list", loaderName);
-            throw std::invalid_argument("customloader not exisiting");
+            throw std::invalid_argument("customloader not existing");
         }
 
         CustomLoaderStatus res = customLoaderInterfacePtr->loadModel(this->config.getName(),
@@ -711,10 +782,45 @@ Status ModelInstance::loadOVModelUsingCustomLoader() {
     }
     return StatusCode::OK;
 }
-
+}  // namespace ovms
+namespace ovms {
 void ModelInstance::loadCompiledModelPtr(const plugin_config_t& pluginConfig) {
     OV_LOGGER("ov::Core: {}, ov::Model: {}, targetDevice: {}, ieCore.compile_model(model, targetDevice, pluginConfig", reinterpret_cast<void*>(&ieCore), reinterpret_cast<void*>(this->model.get()), this->targetDevice);
-    compiledModel = std::make_shared<ov::CompiledModel>(ieCore.compile_model(this->model, this->targetDevice, pluginConfig));
+    if (startsWith(this->targetDevice, "GPU")) {
+#ifdef __linux__
+        if (globalVaDisplay) {
+            OV_LOGGER("ov::intel_gpu::ocl::VAContext(core: {}, globalVaDisplay: {})", (void*)&this->ieCore, globalVaDisplay);
+            this->vaContext = std::make_unique<ov::intel_gpu::ocl::VAContext>(this->ieCore, globalVaDisplay);
+            OV_LOGGER("ov::Core: {} compile_model(model: {}, vaContext:{}, pluginConfig:{})", (void*)&this->ieCore, (void*)this->model.get(), (void*)this->vaContext.get(), (void*)&pluginConfig);
+            compiledModel = std::make_shared<ov::CompiledModel>(ieCore.compile_model(this->model, *this->vaContext, pluginConfig));
+        } else {
+            OV_LOGGER("ov::Core: {} compile_model(model: {}, target_device:{}, pluginConfig:{})", (void*)&this->ieCore, (void*)this->model.get(), this->targetDevice, (void*)&pluginConfig);
+            compiledModel = std::make_shared<ov::CompiledModel>(ieCore.compile_model(this->model, this->targetDevice, pluginConfig));
+        }
+#else
+        // TODO: Rremove when enabled on windows with global disaplay
+        OV_LOGGER("ov::Core: {} compile_model(model: {}, target_device:{}, pluginConfig:{})", (void*)&this->ieCore, (void*)this->model.get(), this->targetDevice, (void*)&pluginConfig);
+        compiledModel = std::make_shared<ov::CompiledModel>(ieCore.compile_model(this->model, this->targetDevice, pluginConfig));
+#endif
+
+#ifdef __linux__
+        OV_LOGGER("ov::CompiledModel->get_context().as<ov::intel_gpu::ocl::ClContext>, compiledModel: {}", (void*)this->compiledModel.get());
+        const auto oclContext = compiledModel->get_context().as<ov::intel_gpu::ocl::ClContext>();
+        OV_LOGGER("ov::intel_gpu::ocl::ClContext(oclContext: {})", (void*)&oclContext);
+        this->oclContextCpp = std::make_unique<ov::intel_gpu::ocl::ClContext>(oclContext);
+        OV_LOGGER("ov::intel_gpu::ocl::ClContext::get(), oclContextCpp: {}", (void*)this->oclContextCpp.get());
+        this->oclContextC = this->oclContextCpp->get();
+        SPDLOG_LOGGER_DEBUG(modelmanager_logger, "Model: {}, version:{}, oclContextC:{}", getName(), getVersion(), (void*)&this->oclContextC);
+#endif
+    } else {
+        compiledModel = std::make_shared<ov::CompiledModel>(ieCore.compile_model(this->model, this->targetDevice, pluginConfig));
+// TODO reset contexts
+#ifdef __linux__
+        this->oclContextCpp.reset();
+        this->vaContext.reset();
+        this->oclContextC = nullptr;
+#endif
+    }
 }
 
 plugin_config_t ModelInstance::prepareDefaultPluginConfig(const ModelConfig& config) {
@@ -793,7 +899,7 @@ Status ModelInstance::fetchModelFilepaths() {
     }
 
     SPDLOG_DEBUG("Getting model files from path: {}", path);
-    if (!dirExists(path)) {
+    if (!FileSystem::dirExists(path)) {
         SPDLOG_ERROR("Missing model directory {}", path);
         return StatusCode::PATH_INVALID;
     }
@@ -814,7 +920,7 @@ Status ModelInstance::fetchModelFilepaths() {
 }
 
 Status ModelInstance::prepareInferenceRequestsQueue(const ModelConfig& config) {
-    uint numberOfParallelInferRequests = getNumOfParallelInferRequests(config);
+    uint32_t numberOfParallelInferRequests = getNumOfParallelInferRequests(config);
     if (numberOfParallelInferRequests == 0) {
         return Status(StatusCode::INVALID_NIREQ, "Exceeded allowed nireq value");
     }
@@ -837,6 +943,23 @@ void ModelInstance::configureBatchSize(const ModelConfig& config, const DynamicM
         OV_LOGGER("ov::Model: {}, ov::set_batch({})", reinterpret_cast<void*>(this->model.get()), ovms::Dimension(config.getBatchSize().value().createPartialDimension()).toString());
         ov::set_batch(model, config.getBatchSize().value().createPartialDimension());
     }
+}
+
+void ModelInstance::loadTensorFactories() {
+    using std::make_shared;
+    this->tensorFactories.clear();
+    this->tensorFactories.emplace(OVMS_BUFFERTYPE_CPU, make_shared<RegularOVTensorFactory>());
+// TODO windows
+#ifdef __linux__
+    if (this->oclContextCpp) {
+        this->tensorFactories.emplace(OVMS_BUFFERTYPE_OPENCL, make_shared<OpenCLTensorFactory>(*this->oclContextCpp));
+        // TODO what to do if display was not initialized? not allow in validation? but here we don't have the information about vacontext unless it is global
+
+        this->tensorFactories.emplace(OVMS_BUFFERTYPE_VASURFACE_Y, make_shared<VAAPITensorFactory>(*this->vaContext, OVMS_BUFFERTYPE_VASURFACE_Y));
+        this->tensorFactories.emplace(OVMS_BUFFERTYPE_VASURFACE_UV, make_shared<VAAPITensorFactory>(*this->vaContext, OVMS_BUFFERTYPE_VASURFACE_UV));
+    }
+#endif
+    // TODO test MULTI/AUTO/HETERO
 }
 
 Status ModelInstance::loadModelImpl(const ModelConfig& config, const DynamicModelParameter& parameter) {
@@ -888,6 +1011,8 @@ Status ModelInstance::loadModelImpl(const ModelConfig& config, const DynamicMode
             this->status.setLoading(ModelVersionStatusErrorCode::UNKNOWN);
             return status;
         }
+        this->checkForOutputTensorResetAbility();
+        this->loadTensorFactories();
     } catch (const ov::Exception& e) {
         SPDLOG_ERROR("exception occurred while loading model: {}", e.what());
         this->status.setLoading(ModelVersionStatusErrorCode::UNKNOWN);
@@ -947,7 +1072,7 @@ Status ModelInstance::reloadModel(const ModelConfig& config, const DynamicModelP
     this->status.setLoading();
     while (!canUnloadInstance()) {
         SPDLOG_INFO("Waiting to reload model: {} version: {}. Blocked by: {} inferences in progress.",
-            getName(), getVersion(), predictRequestsHandlesCount);
+            getName(), getVersion(), predictRequestsHandlesCount.load());
         std::this_thread::sleep_for(std::chrono::milliseconds(UNLOAD_AVAILABILITY_CHECKING_INTERVAL_MILLISECONDS));
     }
     if ((this->config.isCustomLoaderRequiredToLoadModel()) && (isCustomLoaderConfigChanged)) {
@@ -1021,7 +1146,7 @@ Status ModelInstance::reloadModelIfRequired(
     const std::map<std::string, shape_t>& requestedShapes,
     std::unique_ptr<ModelInstanceUnloadGuard>& modelUnloadGuardPtr) {
     OVMS_PROFILE_FUNCTION();
-    Status status = validationStatus;
+    Status status = std::move(validationStatus);
     if (status.batchSizeChangeRequired()) {
         try {
             status = reloadModel(requestedBatchSize, {}, modelUnloadGuardPtr);
@@ -1045,7 +1170,7 @@ Status ModelInstance::reloadModelIfRequired(
     return status;
 }
 
-Status ModelInstance::waitForLoaded(const uint waitForModelLoadedTimeoutMilliseconds,
+Status ModelInstance::waitForLoaded(const uint32_t waitForModelLoadedTimeoutMilliseconds,
     std::unique_ptr<ModelInstanceUnloadGuard>& modelInstanceUnloadGuard) {
     // order is important here for performance reasons
     // assumption: model is already loaded for most of the calls
@@ -1057,9 +1182,9 @@ Status ModelInstance::waitForLoaded(const uint waitForModelLoadedTimeoutMillisec
     modelInstanceUnloadGuard.reset();
 
     // wait several time since no guarantee that cv wakeup will be triggered before calling wait_for
-    const uint waitLoadedTimestepMilliseconds = 100;
-    const uint waitCheckpoints = waitForModelLoadedTimeoutMilliseconds / waitLoadedTimestepMilliseconds;
-    uint waitCheckpointsCounter = waitCheckpoints;
+    const uint32_t waitLoadedTimestepMilliseconds = 100;
+    const uint32_t waitCheckpoints = waitForModelLoadedTimeoutMilliseconds / waitLoadedTimestepMilliseconds;
+    uint32_t waitCheckpointsCounter = waitCheckpoints;
     SPDLOG_DEBUG("Waiting for loaded state for model: {} version: {} with timestep: {} timeout: {} check count: {}", getName(), getVersion(),
         waitLoadedTimestepMilliseconds, waitForModelLoadedTimeoutMilliseconds, waitCheckpointsCounter);
     std::mutex cv_mtx;
@@ -1075,7 +1200,7 @@ Status ModelInstance::waitForLoaded(const uint waitForModelLoadedTimeoutMillisec
         }
         modelInstanceUnloadGuard = std::make_unique<ModelInstanceUnloadGuard>(*this);
         if (getStatus().getState() == ModelVersionState::AVAILABLE) {
-            SPDLOG_INFO("Succesfully waited for model: {}, version: {}", getName(), getVersion());
+            SPDLOG_INFO("Successfully waited for model: {}, version: {}", getName(), getVersion());
             return StatusCode::OK;
         }
         modelInstanceUnloadGuard.reset();
@@ -1117,13 +1242,14 @@ void ModelInstance::cleanupFailedLoad() {
 void ModelInstance::unloadModelComponents() {
     subscriptionManager.notifySubscribers();
     while (!canUnloadInstance()) {
-        SPDLOG_DEBUG("Waiting to unload model: {} version: {}. Blocked by: {} inferences in progres.",
-            getName(), getVersion(), predictRequestsHandlesCount);
+        SPDLOG_DEBUG("Waiting to unload model: {} version: {}. Blocked by: {} inferences in progress.",
+            getName(), getVersion(), predictRequestsHandlesCount.load());
         std::this_thread::sleep_for(std::chrono::milliseconds(UNLOAD_AVAILABILITY_CHECKING_INTERVAL_MILLISECONDS));
     }
     SET_IF_ENABLED(this->getMetricReporter().inferReqQueueSize, 0);
     SET_IF_ENABLED(this->getMetricReporter().streams, 0);
     inferRequestsQueue.reset();
+    tensorFactories.clear();
     compiledModel.reset();
     model.reset();
     outputsInfo.clear();
@@ -1143,30 +1269,17 @@ void ModelInstance::unloadModelComponents() {
             customLoaderInterfacePtr->unloadModel(getName(), getVersion());
         }
     }
+#ifdef __linux__
     malloc_trim(0);
+#elif _WIN32
+    malloc_trim_win();
+#endif
 }
 
 const std::set<std::string>& ModelInstance::getOptionalInputNames() {
     static const std::set<std::string> optionalInputNames = {};
     return optionalInputNames;
 }
-
-template <typename RequestType>
-const Status ModelInstance::validate(const RequestType* request) {
-    OVMS_PROFILE_FUNCTION();
-    return request_validation_utils::validate(
-        *request,
-        getInputsInfo(),
-        getName(),
-        getVersion(),
-        this->getOptionalInputNames(),
-        getModelConfig().getBatchingMode(),
-        getModelConfig().getShapes());
-}
-
-template const Status ModelInstance::validate(const InferenceRequest* request);
-template const Status ModelInstance::validate(const ::KFSRequest* request);
-template const Status ModelInstance::validate(const tensorflow::serving::PredictRequest* request);
 
 Status ModelInstance::performInference(ov::InferRequest& inferRequest) {
     OVMS_PROFILE_FUNCTION();
@@ -1196,99 +1309,28 @@ Status ModelInstance::performInference(ov::InferRequest& inferRequest) {
     return StatusCode::OK;
 }
 
-template <typename RequestType, typename ResponseType>
-Status ModelInstance::infer(const RequestType* requestProto,
-    ResponseType* responseProto,
-    std::unique_ptr<ModelInstanceUnloadGuard>& modelUnloadGuardPtr) {
-    OVMS_PROFILE_FUNCTION();
-    Timer<TIMER_END> timer;
-    using std::chrono::microseconds;
-
-    auto requestProcessor = createRequestProcessor(requestProto, responseProto);  // request, response passed only to deduce type
-    auto status = requestProcessor->extractRequestParameters(requestProto);
-    if (!status.ok())
-        return status;
-    status = validate(requestProto);
-    if (status.batchSizeChangeRequired() || status.reshapeRequired()) {
-        // We are ensured that request shape is valid and convertible to model shape (non negative, non zero)
-        // We can use it to perform reshape via shape=auto
-        auto requestBatchSize = getRequestBatchSize(requestProto, this->getBatchSizeIndex());
-        auto requestShapes = getRequestShapes(requestProto);
-        status = reloadModelIfRequired(status, requestBatchSize, requestShapes, modelUnloadGuardPtr);
+void ModelInstance::checkForOutputTensorResetAbility() {
+    // for resetting output we need copy constructor of compiled model infer request ov::Tensor to be implemented.
+    StreamIdGuard guard(getInferRequestsQueue());
+    auto request = guard.getInferRequest();
+    bool allOutputsSupported = true;
+    for (auto [name, _] : getOutputsInfo()) {
+        try {
+            ov::Tensor tensor = request.get_tensor(name);
+        } catch (std::exception& e) {
+            SPDLOG_LOGGER_WARN(modelmanager_logger, "Resetting output:{}; for model:{}; version:{}, is not supported. Check C-API documentation for OVMS_InferenceRequestOutputSetData. Error:{}", name, getName(), getVersion(), e.what());
+            allOutputsSupported = false;
+        } catch (...) {
+            SPDLOG_LOGGER_WARN(modelmanager_logger, "Resetting output:{}; for model:{}; version:{}, is not supported. Check C-API documentation for OVMS_InferenceRequestOutputSetData.", name, getName(), getVersion());
+            allOutputsSupported = false;
+        }
     }
-    if (!status.ok())
-        return status;
-    status = requestProcessor->prepare();
-    if (!status.ok())
-        return status;
-
-    timer.start(GET_INFER_REQUEST);
-    OVMS_PROFILE_SYNC_BEGIN("getInferRequest");
-    ExecutingStreamIdGuard executingStreamIdGuard(getInferRequestsQueue(), this->getMetricReporter());
-    int executingInferId = executingStreamIdGuard.getId();
-    ov::InferRequest& inferRequest = executingStreamIdGuard.getInferRequest();
-    OVMS_PROFILE_SYNC_END("getInferRequest");
-    timer.stop(GET_INFER_REQUEST);
-    double getInferRequestTime = timer.elapsed<microseconds>(GET_INFER_REQUEST);
-    OBSERVE_IF_ENABLED(this->getMetricReporter().waitForInferReqTime, getInferRequestTime);
-    SPDLOG_DEBUG("Getting infer req duration in model {}, version {}, nireq {}: {:.3f} ms",
-        getName(), getVersion(), executingInferId, getInferRequestTime / 1000);
-
-    timer.start(PREPROCESS);
-    status = requestProcessor->preInferenceProcessing(inferRequest);
-    timer.stop(PREPROCESS);
-    if (!status.ok())
-        return status;
-    SPDLOG_DEBUG("Preprocessing duration in model {}, version {}, nireq {}: {:.3f} ms",
-        getName(), getVersion(), executingInferId, timer.elapsed<microseconds>(PREPROCESS) / 1000);
-
-    timer.start(DESERIALIZE);
-    InputSink<ov::InferRequest&> inputSink(inferRequest);
-    bool isPipeline = false;
-    status = deserializePredictRequest<ConcreteTensorProtoDeserializator>(*requestProto, getInputsInfo(), inputSink, isPipeline);
-    timer.stop(DESERIALIZE);
-    if (!status.ok())
-        return status;
-    SPDLOG_DEBUG("Deserialization duration in model {}, version {}, nireq {}: {:.3f} ms",
-        getName(), getVersion(), executingInferId, timer.elapsed<microseconds>(DESERIALIZE) / 1000);
-
-    timer.start(PREDICTION);
-    status = performInference(inferRequest);
-    timer.stop(PREDICTION);
-    if (!status.ok())
-        return status;
-    SPDLOG_DEBUG("Prediction duration in model {}, version {}, nireq {}: {:.3f} ms",
-        getName(), getVersion(), executingInferId, timer.elapsed<microseconds>(PREDICTION) / 1000);
-
-    timer.start(SERIALIZE);
-    OutputGetter<ov::InferRequest&> outputGetter(inferRequest);
-    status = serializePredictResponse(outputGetter, getName(), getVersion(), getOutputsInfo(), responseProto, getTensorInfoName, useSharedOutputContentFn(requestProto));
-    timer.stop(SERIALIZE);
-    if (!status.ok())
-        return status;
-    SPDLOG_DEBUG("Serialization duration in model {}, version {}, nireq {}: {:.3f} ms",
-        getName(), getVersion(), executingInferId, timer.elapsed<microseconds>(SERIALIZE) / 1000);
-
-    timer.start(POSTPROCESS);
-    status = requestProcessor->postInferenceProcessing(responseProto, inferRequest);
-    timer.stop(POSTPROCESS);
-    if (!status.ok())
-        return status;
-    SPDLOG_DEBUG("Postprocessing duration in model {}, version {}, nireq {}: {:.3f} ms",
-        getName(), getVersion(), executingInferId, timer.elapsed<microseconds>(POSTPROCESS) / 1000);
-    if (this->targetDevice == "AUTO")
-        for (std::string device : compiledModel->get_property(ov::execution_devices))
-            SPDLOG_DEBUG("Used device: {}", device);
-
-    status = requestProcessor->release();
-    return status;
+    this->supportOutputTensorsReset = allOutputsSupported;
 }
-template Status ModelInstance::infer<tensorflow::serving::PredictRequest, tensorflow::serving::PredictResponse>(const tensorflow::serving::PredictRequest* requestProto,
-    tensorflow::serving::PredictResponse* responseProto,
-    std::unique_ptr<ModelInstanceUnloadGuard>& modelUnloadGuardPtr);
-template Status ModelInstance::infer(const ::KFSRequest* requestProto,
-    ::KFSResponse* responseProto,
-    std::unique_ptr<ModelInstanceUnloadGuard>& modelUnloadGuardPtr);
+bool ModelInstance::doesSupportOutputReset() const {
+    return this->supportOutputTensorsReset;
+}
+
 const size_t ModelInstance::getBatchSizeIndex() const {
     const auto& inputItr = this->inputsInfo.cbegin();
     if (inputItr == this->inputsInfo.cend()) {
@@ -1325,34 +1367,4 @@ uint32_t ModelInstance::getNumOfStreams() const {
     }
     return getOptimalNumberOfInferRequests();
 }
-
-std::unique_ptr<RequestProcessor<tensorflow::serving::PredictRequest, tensorflow::serving::PredictResponse>> ModelInstance::createRequestProcessor(const tensorflow::serving::PredictRequest*, tensorflow::serving::PredictResponse*) {
-    return std::make_unique<RequestProcessor<tensorflow::serving::PredictRequest, tensorflow::serving::PredictResponse>>();
-}
-std::unique_ptr<RequestProcessor<KFSRequest, KFSResponse>> ModelInstance::createRequestProcessor(const KFSRequest*, KFSResponse*) {
-    return std::make_unique<RequestProcessor<KFSRequest, KFSResponse>>();
-}
-std::unique_ptr<RequestProcessor<InferenceRequest, InferenceResponse>> ModelInstance::createRequestProcessor(const InferenceRequest*, InferenceResponse*) {
-    return std::make_unique<RequestProcessor<InferenceRequest, InferenceResponse>>();
-}
-
-template Status ModelInstance::infer<InferenceRequest, InferenceResponse>(InferenceRequest const*, InferenceResponse*, std::unique_ptr<ModelInstanceUnloadGuard>&);
-
-template <typename RequestType, typename ResponseType>
-RequestProcessor<RequestType, ResponseType>::RequestProcessor() = default;
-template <typename RequestType, typename ResponseType>
-RequestProcessor<RequestType, ResponseType>::~RequestProcessor() = default;
-template <typename RequestType, typename ResponseType>
-Status RequestProcessor<RequestType, ResponseType>::extractRequestParameters(const RequestType* request) { return StatusCode::OK; }
-template <typename RequestType, typename ResponseType>
-Status RequestProcessor<RequestType, ResponseType>::prepare() { return StatusCode::OK; }
-template <typename RequestType, typename ResponseType>
-Status RequestProcessor<RequestType, ResponseType>::preInferenceProcessing(ov::InferRequest& inferRequest) { return StatusCode::OK; }
-template <typename RequestType, typename ResponseType>
-Status RequestProcessor<RequestType, ResponseType>::postInferenceProcessing(ResponseType* response, ov::InferRequest& inferRequest) { return StatusCode::OK; }
-template <typename RequestType, typename ResponseType>
-Status RequestProcessor<RequestType, ResponseType>::release() { return StatusCode::OK; }
-
-template class RequestProcessor<tensorflow::serving::PredictRequest, tensorflow::serving::PredictResponse>;
-template class RequestProcessor<KFSRequest, KFSResponse>;
 }  // namespace ovms

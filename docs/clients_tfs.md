@@ -8,7 +8,7 @@ hidden:
 
 gRPC API <ovms_docs_grpc_api_tfs>
 RESTful API <ovms_docs_rest_api_tfs>
-Examples <https://github.com/openvinotoolkit/model_server/blob/releases/2023/3/client/python/tensorflow-serving-api/samples/README.md>
+Examples <https://github.com/openvinotoolkit/model_server/blob/releases/2025/3/client/python/tensorflow-serving-api/samples/README.md>
 ```
 
 ## Python Client
@@ -329,7 +329,7 @@ curl -X POST http://localhost:8000/v1/models/my_model:predict
 ::::
 
 
-For complete usage examples see [ovmsclient samples](https://github.com/openvinotoolkit/model_server/tree/releases/2023/3/client/python/ovmsclient/samples).
+For complete usage examples see [ovmsclient samples](https://github.com/openvinotoolkit/model_server/tree/releases/2025/3/client/python/ovmsclient/samples).
 
 ## C++ and Go Clients
 
@@ -337,4 +337,4 @@ Creating a client application in C++ or [Go](https://go.dev/) follows the same p
 
 To successfully set up communication with the model server, you need to implement the logic to communicate with endpoints specified in the [API](writing_app.md). For gRPC, download and compile protos, then link and use them in your application according to the [gRPC API specification](model_server_grpc_api_tfs.md). For REST, prepare your data and pack it into the appropriate JSON structure according to the [REST API specification](model_server_rest_api_tfs.md).
 
-See our [C++ demo](../demos/image_classification/cpp/README.md) or [Go demo](../demos/image_classification/go/README.md) to learn how to build a sample C++ and Go-based client application in a Docker container and get predictions via the gRPC API. 
+See our [Go demo](../demos/image_classification/go/README.md) to learn how to build a sample Go-based client application in a Docker container and get predictions via the gRPC API. 

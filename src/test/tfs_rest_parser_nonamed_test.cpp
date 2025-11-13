@@ -17,7 +17,10 @@
 #include <gtest/gtest.h>
 
 #include "../rest_parser.hpp"
+#pragma warning(push)
+#pragma warning(disable : 6001)
 #include "absl/strings/escaping.h"
+#pragma warning(pop)
 #include "test_utils.hpp"
 
 using namespace ovms;
@@ -57,6 +60,26 @@ TEST(TFSRestParserNoNamed, RowOrder_2x1x3x1x5) {
                                                                 1, 2, 3, 4, 5,
                                                                 1, 2, 3, 4, 5,
                                                                 1, 2, 3, 4, 5));
+}
+
+TEST(TFSRestParserNoNamed, RowOrderBinary_2) {
+    TFSRestParser parser(prepareTensors({{"my_input", {2}}}));
+
+    ASSERT_EQ(parser.parse(R"({"signature_name":"","instances":[
+        {"b64": "ORw0"},
+        {"b64": "ORw0"}
+        ]})"),
+        StatusCode::OK);
+    EXPECT_EQ(parser.getOrder(), Order::ROW);
+    EXPECT_EQ(parser.getFormat(), Format::NONAMED);
+    ASSERT_EQ(parser.getProto().inputs().count("my_input"), 1);
+    const auto& my_input = parser.getProto().inputs().at("my_input");
+    EXPECT_THAT(asVector(my_input.tensor_shape()), ElementsAre(2));
+    EXPECT_EQ(my_input.dtype(), tensorflow::DataType::DT_STRING);
+
+    char expectedBinary[] = {57, 28, 52};
+    EXPECT_EQ(my_input.string_val()[0], std::string(expectedBinary, expectedBinary + 3));
+    EXPECT_EQ(my_input.string_val()[1], std::string(expectedBinary, expectedBinary + 3));
 }
 
 TEST(TFSRestParserNoNamed, RowOrder_2x1x3x1x0) {
@@ -182,6 +205,26 @@ TEST(TFSRestParserNoNamed, ColumnOrder_2x1x3x1x5) {
                                                                 1, 2, 3, 4, 5,
                                                                 1, 2, 3, 4, 5,
                                                                 1, 2, 3, 4, 5));
+}
+
+TEST(TFSRestParserNoNamed, ColumnOrderBinary_2) {
+    TFSRestParser parser(prepareTensors({{"my_input", {2}}}));
+
+    ASSERT_EQ(parser.parse(R"({"signature_name":"","inputs":[
+        {"b64": "ORw0"},
+        {"b64": "ORw0"}
+        ]})"),
+        StatusCode::OK);
+    EXPECT_EQ(parser.getOrder(), Order::COLUMN);
+    EXPECT_EQ(parser.getFormat(), Format::NONAMED);
+    ASSERT_EQ(parser.getProto().inputs().count("my_input"), 1);
+    const auto& my_input = parser.getProto().inputs().at("my_input");
+    EXPECT_THAT(asVector(my_input.tensor_shape()), ElementsAre(2));
+    EXPECT_EQ(my_input.dtype(), tensorflow::DataType::DT_STRING);
+
+    char expectedBinary[] = {57, 28, 52};
+    EXPECT_EQ(my_input.string_val()[0], std::string(expectedBinary, expectedBinary + 3));
+    EXPECT_EQ(my_input.string_val()[1], std::string(expectedBinary, expectedBinary + 3));
 }
 
 TEST(TFSRestParserNoNamed, ColumnOrder_2x1x3x1x0) {

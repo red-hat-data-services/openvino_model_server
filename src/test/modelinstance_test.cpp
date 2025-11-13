@@ -24,6 +24,7 @@
 #include "../get_model_metadata_impl.hpp"
 #include "../modelinstance.hpp"
 #include "../modelinstanceunloadguard.hpp"
+#include "gpuenvironment.hpp"
 #include "test_utils.hpp"
 
 using testing::Return;
@@ -99,6 +100,8 @@ TEST_F(TestUnloadModel, CantUnloadModelWhilePredictPathAcquiredAndLockedInstance
     ASSERT_EQ(status, ovms::StatusCode::OK);
     modelInstance.increasePredictRequestsHandlesCount();
     EXPECT_FALSE(modelInstance.canUnloadInstance());
+    modelInstance.decreasePredictRequestsHandlesCount();
+    EXPECT_TRUE(modelInstance.canUnloadInstance());
 }
 
 TEST_F(TestUnloadModel, CanUnloadModelNotHoldingModelInstanceAtPredictPath) {
@@ -109,6 +112,18 @@ TEST_F(TestUnloadModel, CanUnloadModelNotHoldingModelInstanceAtPredictPath) {
     modelInstance.increasePredictRequestsHandlesCount();
     modelInstance.decreasePredictRequestsHandlesCount();
     EXPECT_TRUE(modelInstance.canUnloadInstance());
+}
+
+TEST_F(TestUnloadModel, NoNameOutput) {
+    ovms::ModelInstance modelInstance("UNUSED_NAME", UNUSED_MODEL_VERSION, *ieCore);
+    ASSERT_EQ(modelInstance.loadModel(NO_NAME_MODEL_CONFIG), ovms::StatusCode::OK);
+    ASSERT_EQ(ovms::ModelVersionState::AVAILABLE, modelInstance.getStatus().getState());
+    EXPECT_EQ(modelInstance.getInputsInfo().count("input_1"), 1);
+    EXPECT_EQ(modelInstance.getInputsInfo().count("input_2"), 1);
+    EXPECT_EQ(modelInstance.getOutputsInfo().count("out_0"), 1);
+    EXPECT_EQ(modelInstance.getOutputsInfo().count("out_1"), 1);
+    modelInstance.retireModel();
+    EXPECT_EQ(ovms::ModelVersionState::END, modelInstance.getStatus().getState());
 }
 
 TEST_F(TestUnloadModel, UnloadWaitsUntilMetadataResponseIsBuilt) {
@@ -148,6 +163,7 @@ TEST_F(TestUnloadModel, UnloadWaitsUntilMetadataResponseIsBuilt) {
     EXPECT_EQ(outputs.size(), 1);
     EXPECT_EQ(inputs.begin()->second.name(), DUMMY_MODEL_INPUT_NAME);
     EXPECT_EQ(outputs.begin()->second.name(), DUMMY_MODEL_OUTPUT_NAME);
+    instance.reset();
 }
 
 TEST_F(TestUnloadModel, CheckIfCanUnload) {
@@ -187,6 +203,43 @@ protected:
         ieCore = std::make_unique<ov::Core>();
     }
 };
+
+using ovms::Status;
+using ovms::StatusCode;
+using testing::_;
+namespace {
+class MockModelInstanceEmptyInputs : public ovms::ModelInstance {
+public:
+    MockModelInstanceEmptyInputs(ov::Core& ieCore) :
+        ModelInstance("UNUSED_NAME", UNUSED_MODEL_VERSION, ieCore) {}
+    MOCK_METHOD(ovms::Status, loadInputTensorsImpl, (const ovms::ModelConfig&, const ovms::DynamicModelParameter&), (override));
+};
+class MockModelInstanceEmptyOutputs : public ovms::ModelInstance {
+public:
+    MockModelInstanceEmptyOutputs(ov::Core& ieCore) :
+        ModelInstance("UNUSED_NAME", UNUSED_MODEL_VERSION, ieCore) {}
+    MOCK_METHOD(ovms::Status, loadOutputTensorsImpl, (const ovms::ModelConfig&), (override));
+};
+}  // namespace
+
+TEST_F(TestLoadModel, ShouldFailWithEmptyInputs) {
+    MockModelInstanceEmptyInputs mockModelInstance(*ieCore);
+    EXPECT_CALL(mockModelInstance, loadInputTensorsImpl(_, _))
+        .WillOnce(Return(Status(StatusCode::OK)));
+    auto status = mockModelInstance.loadModel(DUMMY_MODEL_CONFIG);
+    EXPECT_EQ(status, StatusCode::OV_NO_INPUTS) << status.string();
+    EXPECT_EQ(ovms::ModelVersionState::LOADING, mockModelInstance.getStatus().getState());
+    EXPECT_EQ(ovms::ModelVersionStatusErrorCode::UNKNOWN, mockModelInstance.getStatus().getErrorCode());
+}
+TEST_F(TestLoadModel, ShouldFailWithEmptyOutputs) {
+    MockModelInstanceEmptyOutputs mockModelInstance(*ieCore);
+    EXPECT_CALL(mockModelInstance, loadOutputTensorsImpl(_))
+        .WillOnce(Return(Status(StatusCode::OK)));
+    auto status = mockModelInstance.loadModel(DUMMY_MODEL_CONFIG);
+    EXPECT_EQ(status, StatusCode::OV_NO_OUTPUTS) << status.string();
+    EXPECT_EQ(ovms::ModelVersionState::LOADING, mockModelInstance.getStatus().getState());
+    EXPECT_EQ(ovms::ModelVersionStatusErrorCode::UNKNOWN, mockModelInstance.getStatus().getErrorCode());
+}
 
 class MockModelInstanceWithRTMap : public ovms::ModelInstance {
 private:
@@ -344,6 +397,55 @@ TEST_F(TestLoadModel, CheckIfNonExistingXmlFileReturnsFileInvalid) {
     auto status = modelInstance.loadModel(config);
     EXPECT_EQ(status, ovms::StatusCode::FILE_INVALID) << status.string();
 }
+class TestLoadModelWithRemoteTensorFactoriesSucceeds : public ::testing::Test {
+protected:
+    ovms::ModelConfig config;
+    std::unique_ptr<ov::Core> ieCore;
+    void SetUp() {
+        ieCore = std::make_unique<ov::Core>();
+
+        config = ovms::ModelConfig{
+            "NOT_USED_NAME",
+            dummy_model_location,  // base path
+            "SOME",                // target device
+            "1",                   // batchsize
+            1,                     // NIREQ
+            false,                 // is stateful
+            false,                 // idle sequence cleanup enabled
+            false,                 // low latency transformation enabled
+            500,                   // stateful sequence max number,
+            "",                    // cache dir
+            1,                     // version
+            dummy_model_location,  // local path
+        };
+    }
+};
+TEST_F(TestLoadModelWithRemoteTensorFactoriesSucceeds, OpenCL_CheckIfLoadingSucceedsForGPU) {
+    SKIP_AND_EXIT_IF_NO_GPU();
+    this->config.setTargetDevice("GPU");
+    ovms::ModelInstance modelInstance("UNUSED_NAME", UNUSED_MODEL_VERSION, *ieCore);
+    auto status = modelInstance.loadModel(config);
+    EXPECT_EQ(status, ovms::StatusCode::OK) << status.string();
+}
+TEST_F(TestLoadModelWithRemoteTensorFactoriesSucceeds, OpenCL_CheckIfLoadingSucceedsForHeteroCPUGPU) {
+    SKIP_AND_EXIT_IF_NO_GPU();
+    this->config.setTargetDevice("HETERO:GPU,CPU");
+    ovms::ModelInstance modelInstance("UNUSED_NAME", UNUSED_MODEL_VERSION, *ieCore);
+    auto status = modelInstance.loadModel(config);
+    EXPECT_EQ(status, ovms::StatusCode::OK) << status.string();
+}
+TEST_F(TestLoadModelWithRemoteTensorFactoriesSucceeds, CheckIfLoadingSucceedsForAutoCPUGPU) {
+    this->config.setTargetDevice("AUTO:GPU,CPU");
+    ovms::ModelInstance modelInstance("UNUSED_NAME", UNUSED_MODEL_VERSION, *ieCore);
+    auto status = modelInstance.loadModel(config);
+    EXPECT_EQ(status, ovms::StatusCode::OK) << status.string();
+}
+TEST_F(TestLoadModelWithRemoteTensorFactoriesSucceeds, CheckIfLoadingSucceedsForMultiCPUGPU) {
+    this->config.setTargetDevice("MULTI:GPU,CPU");
+    ovms::ModelInstance modelInstance("UNUSED_NAME", UNUSED_MODEL_VERSION, *ieCore);
+    auto status = modelInstance.loadModel(config);
+    EXPECT_EQ(status, ovms::StatusCode::OK) << status.string();
+}
 
 TEST_F(TestLoadModel, CheckIfNonExistingBinFileReturnsFileInvalid) {
     ovms::ModelInstance modelInstance("UNUSED_NAME", UNUSED_MODEL_VERSION, *ieCore);
@@ -425,7 +527,11 @@ TEST_F(TestLoadModel, CheckMultipleFormatsHandling) {
     auto status = modelInstance.loadModel(config);
     auto model_files = modelInstance.getModelFiles();
     ASSERT_FALSE(model_files.empty());
+#ifdef _WIN32
+    EXPECT_EQ(model_files.front(), directoryPath + "/test_multiple_models\\1\\model.xml");
+#elif __linux__
     EXPECT_EQ(model_files.front(), directoryPath + "/test_multiple_models/1/model.xml");
+#endif
 }
 
 TEST_F(TestLoadModel, CheckSavedModelHandling) {
@@ -459,7 +565,11 @@ TEST_F(TestLoadModel, CheckSavedModelHandling) {
     auto status = modelInstance.loadModel(config);
     auto model_files = modelInstance.getModelFiles();
     ASSERT_FALSE(model_files.empty());
+#ifdef _WIN32
+    EXPECT_EQ(model_files.front(), directoryPath + "/test_saved_model\\1\\");
+#elif __linux__
     EXPECT_EQ(model_files.front(), directoryPath + "/test_saved_model/1/");
+#endif
 }
 
 TEST_F(TestLoadModel, CheckTFModelHandling) {
@@ -493,7 +603,11 @@ TEST_F(TestLoadModel, CheckTFModelHandling) {
     auto status = modelInstance.loadModel(config);
     auto model_files = modelInstance.getModelFiles();
     ASSERT_FALSE(model_files.empty());
+#ifdef _WIN32
+    EXPECT_EQ(model_files.front(), directoryPath + "/test_tf\\1\\model.pb");
+#elif __linux__
     EXPECT_EQ(model_files.front(), directoryPath + "/test_tf/1/model.pb");
+#endif
 }
 
 TEST_F(TestLoadModel, CheckONNXModelHandling) {
@@ -527,7 +641,11 @@ TEST_F(TestLoadModel, CheckONNXModelHandling) {
     auto status = modelInstance.loadModel(config);
     auto model_files = modelInstance.getModelFiles();
     ASSERT_FALSE(model_files.empty());
+#ifdef _WIN32
+    EXPECT_EQ(model_files.front(), directoryPath + "/test_onnx\\1\\my-model.onnx");
+#elif __linux__
     EXPECT_EQ(model_files.front(), directoryPath + "/test_onnx/1/my-model.onnx");
+#endif
 }
 
 TEST_F(TestLoadModel, CheckTFLiteModelHandling) {
@@ -562,6 +680,16 @@ TEST_F(TestLoadModel, CheckTFLiteModelHandling) {
     auto model_files = modelInstance.getModelFiles();
     ASSERT_FALSE(model_files.empty());
     EXPECT_EQ(model_files.front(), directoryPath + "/test_tflite/1/my-model.tflite");
+}
+
+TEST_F(TestLoadModel, StringLoad) {
+    ovms::ModelInstance modelInstance("UNUSED_NAME", UNUSED_MODEL_VERSION, *ieCore);
+    EXPECT_EQ(modelInstance.loadModel(NATIVE_STRING_MODEL_CONFIG), ovms::StatusCode::OK);
+    EXPECT_EQ(ovms::ModelVersionState::AVAILABLE, modelInstance.getStatus().getState());
+    ASSERT_EQ(modelInstance.getInputsInfo().size(), 1);
+    ASSERT_EQ(modelInstance.getInputsInfo().begin()->second->getPrecision(), ovms::Precision::STRING);
+    ASSERT_EQ(modelInstance.getOutputsInfo().size(), 1);
+    ASSERT_EQ(modelInstance.getOutputsInfo().begin()->second->getPrecision(), ovms::Precision::STRING);
 }
 
 TEST_F(TestLoadModel, SuccessfulLoad) {
@@ -629,10 +757,10 @@ TEST_F(TestLoadModel, SuccessfulLoadDummyDimensionRanges) {
 TEST_F(TestLoadModel, CorrectNumberOfStreamsSet) {
     ovms::ModelInstance modelInstance("UNUSED_NAME", UNUSED_MODEL_VERSION, *ieCore);
     ovms::ModelConfig config = DUMMY_MODEL_CONFIG;
-    config.setPluginConfig({{"CPU_THROUGHPUT_STREAMS", "6"}});
+    config.setPluginConfig({{"NUM_STREAMS", "3"}});
     ASSERT_EQ(modelInstance.loadModel(config), ovms::StatusCode::OK);
     ASSERT_EQ(ovms::ModelVersionState::AVAILABLE, modelInstance.getStatus().getState());
-    ASSERT_EQ(modelInstance.getNumOfStreams(), 6);
+    ASSERT_EQ(modelInstance.getNumOfStreams(), 3);
 }
 
 TEST_F(TestLoadModel, ScalarModelWithBatchSetToFixed) {
@@ -1080,26 +1208,9 @@ TEST(CpuThroughputStreamsNotSpecified, NotSetWhenPerfHintSpecified) {
     config.setTargetDevice("CPU");
     ovms::plugin_config_t pluginConfig = ovms::ModelInstance::prepareDefaultPluginConfig(config);
     EXPECT_EQ(pluginConfig.count("CPU_THROUGHPUT_STREAMS"), 0);
-    config.setPluginConfig({{"PERFORMANCE_HINT", "THROUGHTPUT"}});
+    config.setPluginConfig({{"PERFORMANCE_HINT", "THROUGHPUT"}});
     pluginConfig = ovms::ModelInstance::prepareDefaultPluginConfig(config);
     EXPECT_EQ(pluginConfig.count("CPU_THROUGHPUT_STREAMS"), 0);
-}
-
-TEST(CpuThroughputNotSpecified, AffinityWithoutHint) {
-    ovms::ModelConfig config;
-    config.setPluginConfig({{"AFFINITY", "NUMA"}});
-    ovms::plugin_config_t pluginConfig = ovms::ModelInstance::prepareDefaultPluginConfig(config);
-    EXPECT_EQ(pluginConfig.count("PERFORMANCE_HINT"), 1);
-    EXPECT_EQ(pluginConfig.count("AFFINITY"), 1);
-}
-
-TEST(CpuThroughputNotSpecified, AffinityWithNumStreams) {
-    ovms::ModelConfig config;
-    config.setPluginConfig({{"NUM_STREAMS", "4"}, {"AFFINITY", "NUMA"}});
-    ovms::plugin_config_t pluginConfig = ovms::ModelInstance::prepareDefaultPluginConfig(config);
-    EXPECT_EQ(pluginConfig.count("PERFORMANCE_HINT"), 0);
-    EXPECT_EQ(pluginConfig.count("AFFINITY"), 1);
-    EXPECT_EQ(pluginConfig.count("NUM_STREAMS"), 1);
 }
 
 TEST(TensorMap, TestProcessingHintFromShape) {
@@ -1110,8 +1221,8 @@ TEST(TensorMap, TestProcessingHintFromShape) {
             std::make_shared<ovms::TensorInfo>("Input_U8_1_3_NCHW", ovms::Precision::U8, ovms::shape_t{1, 3})},
         {"Input_U8_3_N",
             std::make_shared<ovms::TensorInfo>("Input_U8_3_N", ovms::Precision::U8, ovms::shape_t{3})},
-        {"Input_U8_-1_N",
-            std::make_shared<ovms::TensorInfo>("Input_U8_-1_N", ovms::Precision::U8, ovms::Shape{ovms::Dimension::any()})},
+        {"Input_Native_-1_N",
+            std::make_shared<ovms::TensorInfo>("Input_Native_-1_N", ovms::Precision::STRING, ovms::Shape{ovms::Dimension::any()})},
     });
     auto servableOutputs = ovms::tensor_map_t({{"Output_U8_-1_-1_N?",
                                                    std::make_shared<ovms::TensorInfo>("Output_U8_-1_-1_N?", ovms::Precision::U8, ovms::Shape{ovms::Dimension::any(), ovms::Dimension::any()})},
@@ -1123,7 +1234,7 @@ TEST(TensorMap, TestProcessingHintFromShape) {
     EXPECT_EQ(servableInputs["Input_FP32_1_224_224_3_NHWC"]->getPreProcessingHint(), ovms::TensorInfo::ProcessingHint::IMAGE);
     EXPECT_EQ(servableInputs["Input_U8_1_3_NCHW"]->getPreProcessingHint(), ovms::TensorInfo::ProcessingHint::STRING_2D_U8);
     EXPECT_EQ(servableInputs["Input_U8_3_N"]->getPreProcessingHint(), ovms::TensorInfo::ProcessingHint::NO_PROCESSING);  // due to static dimension
-    EXPECT_EQ(servableInputs["Input_U8_-1_N"]->getPreProcessingHint(), ovms::TensorInfo::ProcessingHint::STRING_1D_U8);
+    EXPECT_EQ(servableInputs["Input_Native_-1_N"]->getPreProcessingHint(), ovms::TensorInfo::ProcessingHint::STRING_NATIVE);
     EXPECT_EQ(servableOutputs["Output_U8_-1_-1_N?"]->getPostProcessingHint(), ovms::TensorInfo::ProcessingHint::NO_PROCESSING);           // due to no suffix
     EXPECT_EQ(servableOutputs["Output_U8_-1_-1_N?_string"]->getPostProcessingHint(), ovms::TensorInfo::ProcessingHint::STRING_2D_U8);     // due to suffix
     EXPECT_EQ(servableOutputs["Output_FP32_-1_-1_N?_string"]->getPostProcessingHint(), ovms::TensorInfo::ProcessingHint::NO_PROCESSING);  // no processing due to not being U8

@@ -19,11 +19,12 @@
 #include <fstream>
 #include <regex>
 #include <set>
+#include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
-#include <spdlog/spdlog.h>
-
+#include "logging.hpp"
 #include "model_version_policy.hpp"
 #include "openssl/md5.h"
 #include "status.hpp"
@@ -123,33 +124,35 @@ public:
      */
 
     virtual StatusCode deleteFileFolder(const std::string& path) = 0;
+
     /**
      * @brief Create a Temp Path
      *
      * @param local_path
      * @return StatusCode
      */
-    static StatusCode createTempPath(std::string* local_path) {
-        std::string file_template = "/tmp/fileXXXXXX";
-        char* tmp_folder = mkdtemp(const_cast<char*>(file_template.c_str()));
-        if (tmp_folder == nullptr) {
-            SPDLOG_ERROR("Failed to create local temp folder: {} {}", file_template, strerror(errno));
-            return StatusCode::FILESYSTEM_ERROR;
-        }
-        fs::permissions(tmp_folder,
-            fs::perms::others_all | fs::perms::group_all,
-            fs::perm_options::remove);
-
-        *local_path = std::string(tmp_folder);
-
-        return StatusCode::OK;
-    }
+    static StatusCode createTempPath(std::string* local_path);
 
     static bool isPathEscaped(const std::string& path) {
         std::size_t lhs = path.find("../");
         std::size_t rhs = path.find("/..");
-        return (std::string::npos != lhs && lhs == 0) || (std::string::npos != rhs && rhs == path.length() - 3) || std::string::npos != path.find("/../");
+        bool escapedLinux = (std::string::npos != lhs && lhs == 0) || (std::string::npos != rhs && rhs == path.length() - 3) || std::string::npos != path.find("/../");
+
+        lhs = path.find("..\\");
+        rhs = path.find("\\..");
+        return escapedLinux || (std::string::npos != lhs && lhs == 0) || (std::string::npos != rhs && rhs == path.length() - 3) || std::string::npos != path.find("\\..\\");
     }
+
+    static bool dirExists(const std::string& path) {
+        if (isPathEscaped(path)) {
+            SPDLOG_ERROR("Path {} escape with .. is forbidden.", path);
+            return false;
+        }
+
+        return std::filesystem::is_directory(path);
+    }
+
+    static std::string findFilePathWithExtension(const std::string& path, const std::string& extension);
 
     static const std::string S3_URL_PREFIX;
 
@@ -181,7 +184,7 @@ public:
         } else if (!FileSystem::isLocalFilesystem(givenPath)) {
             // Cloud filesystem
             path = givenPath;
-        } else if (givenPath.size() > 0 && givenPath.at(0) == '/') {
+        } else if (givenPath.size() > 0 && isFullPath(givenPath)) {
             // Full path case
             path = givenPath;
         } else {
@@ -192,22 +195,36 @@ public:
         }
     }
 
+    static bool isFullPath(const std::string& inputPath) {
+        std::filesystem::path filePath(inputPath);
+        try {
+            std::filesystem::path absolutePath = std::filesystem::absolute(filePath);
+            return absolutePath == filePath;
+        } catch (const std::exception& e) {
+            SPDLOG_ERROR("Exception during path absolute check for path:", inputPath, e.what());
+            return false;
+        } catch (...) {
+            SPDLOG_ERROR("Exception during path absolute check for path:", inputPath);
+            return false;
+        }
+    }
+
     static void setRootDirectoryPath(std::string& rootDirectoryPath, const std::string& givenPath) {
-        std::string currentWorkingDir = std::filesystem::current_path();
+        std::string currentWorkingDir = std::filesystem::current_path().string();
         if (givenPath.size() > 1 && givenPath.find_last_of("/\\") != std::string::npos) {
             auto configDirectory = givenPath.substr(0, givenPath.find_last_of("/\\") + 1);
-            configDirectory.empty() ? rootDirectoryPath = currentWorkingDir + "/" : rootDirectoryPath = configDirectory;
+            configDirectory.empty() ? rootDirectoryPath = currentWorkingDir + getOsSeparator() : rootDirectoryPath = std::move(configDirectory);
         } else {
-            rootDirectoryPath = currentWorkingDir + "/";
+            rootDirectoryPath = currentWorkingDir + getOsSeparator();
         }
     }
 
     static std::string appendSlash(const std::string& name) {
-        if (name.empty() || (name.back() == '/')) {
+        if (name.empty() || (name.back() == getOsSeparator().back())) {
             return name;
         }
 
-        return (name + "/");
+        return (name + getOsSeparator());
     }
 
     static bool isAbsolutePath(const std::string& path) {
@@ -234,6 +251,10 @@ public:
             }
         }
 
+        // Windows path creation
+        if (FileSystem::getOsSeparator() != "/") {
+            std::replace(joined.begin(), joined.end(), '/', '\\');
+        }
         return joined;
     }
 
@@ -252,17 +273,20 @@ public:
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wdeprecated-declarations"
         MD5((unsigned char*)str.c_str(), str.size(), result);
-#pragma GCC diagnostic pop
-
         std::string md5sum(reinterpret_cast<char*>(result), MD5_DIGEST_LENGTH);
+#pragma GCC diagnostic pop
         return (md5sum);
     }
 
+    static const std::string& getOsSeparator();
+
+    static Status createFileOverwrite(const std::string& filePath, const std::string& contents);
+
     StatusCode CreateLocalDir(const std::string& path) {
-        int status =
-            mkdir(const_cast<char*>(path.c_str()), S_IRUSR | S_IWUSR | S_IXUSR);
-        if (status == -1) {
-            SPDLOG_ERROR("Failed to create local folder: {} {} ", path, strerror(errno));
+        try {
+            fs::create_directory(path);
+        } catch (const std::exception& e) {
+            SPDLOG_LOGGER_ERROR(modelmanager_logger, "Failed to create local folder: {} {} ", path, e.what());
             return StatusCode::PATH_INVALID;
         }
         return StatusCode::OK;

@@ -18,23 +18,21 @@
 HTTP_PROXY := "$(http_proxy)"
 HTTPS_PROXY := "$(https_proxy)"
 NO_PROXY := "$(no_proxy)"
-BASE_OS_TAG_UBUNTU ?= 20.04
-BASE_OS_TAG_REDHAT ?= 8.8
-REDHAT_PACKAGE_URL ?="https://github.com/openvinotoolkit/model_server/releases/download/v2023.3/ovms_redhat.tar.gz"
-UBUNTU_PACKAGE_URL ?="https://github.com/openvinotoolkit/model_server/releases/download/v2023.3/ovms_ubuntu20.tar.gz"
 
 OVMS_CPP_DOCKER_IMAGE ?= openvino/model_server
 OVMS_CPP_IMAGE_TAG ?= latest
-BASE_OS ?= ubuntu
-DIST_OS ?= $(BASE_OS)
+BASE_OS ?= ubuntu24
 
-ifeq ($(BASE_OS),ubuntu)
-  PACKAGE_URL = ${UBUNTU_PACKAGE_URL}
+ifeq ($(BASE_OS),ubuntu24)
+  BASE_OS_TAG_UBUNTU ?= 24.04
+  PACKAGE_URL ?="https://github.com/openvinotoolkit/model_server/releases/download/v2025.3/ovms_ubuntu24.tar.gz"
   BASE_IMAGE ?= ubuntu:$(BASE_OS_TAG_UBUNTU)
+  DIST_OS=ubuntu
 endif
 ifeq ($(BASE_OS),redhat)
-  PACKAGE_URL = ${REDHAT_PACKAGE_URL}
-  BASE_IMAGE ?= registry.access.redhat.com/ubi8/ubi:$(BASE_OS_TAG_REDHAT)
+  BASE_OS_TAG_REDHAT ?= 9.6
+  PACKAGE_URL ="https://github.com/openvinotoolkit/model_server/releases/download/v2025.3/ovms_redhat.tar.gz"
+  BASE_IMAGE ?= registry.access.redhat.com/ubi9/ubi:$(BASE_OS_TAG_REDHAT)
   DIST_OS=redhat
 endif
 
@@ -45,7 +43,7 @@ clean:
 from_docker:
 	mkdir -p capi/$(DIST_OS)
 	docker run $(OVMS_CPP_DOCKER_IMAGE)-pkg:$(OVMS_CPP_IMAGE_TAG) bash -c \
-			"tar -c -C /ovms_pkg/$(DIST_OS) ovms.tar.gz ; sleep 2" | tar -x -C capi/$(DIST_OS)/ && cd ../../
+			"tar -c -C /ovms_pkg/$(BASE_OS) ovms.tar.gz ; sleep 2" | tar -x -C capi/$(DIST_OS)/ && cd ../../
 	-docker rm -v $$(docker ps -a -q -f status=exited -f ancestor=$(OVMS_CPP_DOCKER_IMAGE)-pkg:$(OVMS_CPP_IMAGE_TAG))
 
 from_web:
@@ -56,9 +54,10 @@ build_image:
 	cp -vR capi_files/* capi/$(DIST_OS)/
 	cp -r ../../src/test/dummy capi/$(DIST_OS)/demos
 	cp -r ../../src/main_capi.c* capi/$(DIST_OS)/demos
-	sed -i s+/ovms/src/test/c_api/config.json+/ovms/demos/config.json+ capi/$(DIST_OS)/demos/main_capi.c
-	sed -i s+/ovms/src/test/c_api/config_standard_dummy.json+/ovms/demos/config_standard_dummy.json+ capi/$(DIST_OS)/demos/main_capi.cpp
-	cd capi/$(DIST_OS)/ && docker build $(NO_CACHE_OPTION) -f Dockerfile.$(BASE_OS) . \
+	cp -r ../../src/main_benchmark.cpp capi/$(DIST_OS)/demos
+	sed -i s+/ovms/src/test/configs/config.json+/ovms/demos/config.json+ capi/$(DIST_OS)/demos/main_capi.c
+	sed -i s+/ovms/src/test/configs/config_standard_dummy.json+/ovms/demos/config_standard_dummy.json+ capi/$(DIST_OS)/demos/main_capi.cpp
+	cd capi/$(DIST_OS)/ && docker build $(NO_CACHE_OPTION) -f Dockerfile.$(DIST_OS) . \
 		--build-arg http_proxy=$(HTTP_PROXY) --build-arg https_proxy="$(HTTPS_PROXY)" \
 		--build-arg no_proxy=$(NO_PROXY) \
 		--build-arg BASE_IMAGE=$(BASE_IMAGE) \

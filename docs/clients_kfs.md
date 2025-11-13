@@ -8,7 +8,7 @@ hidden:
 
 gRPC API <ovms_docs_grpc_api_kfs>
 RESTful API <ovms_docs_rest_api_kfs>
-Examples <https://github.com/openvinotoolkit/model_server/tree/releases/2023/3/client/python/kserve-api/samples>
+Examples <https://github.com/openvinotoolkit/model_server/tree/releases/2025/3/client/python/kserve-api/samples>
 ```
 
 ## Python Client
@@ -344,7 +344,7 @@ image_data = []
 with open("image_path", 'rb') as f:
     image_data.append(f.read())
 inputs = []
-inputs.append(grpcclient.InferInput('input_name', 1, "BYTES"))
+inputs.append(grpcclient.InferInput('input_name', [1], "BYTES"))
 nmpy = np.array(image_data , dtype=np.object_)
 inputs[0].set_data_from_numpy(nmpy)
 
@@ -371,7 +371,7 @@ image_data = []
 with open("image_path", 'rb') as f:
     image_data.append(f.read())
 inputs = []
-inputs.append(httpclient.InferInput('input_name', 1, "BYTES"))
+inputs.append(httpclient.InferInput('input_name', [1], "BYTES"))
 nmpy = np.array(image_data , dtype=np.object_)
 inputs[0].set_data_from_numpy(nmpy)
 
@@ -516,7 +516,7 @@ modelInferResponse, err := client.ModelInfer(ctx, &modelInferRequest)
 :::{tab-item} curl
 :sync: curl
 ```{code} bash
-echo -n '{"inputs” : [{"name" : "0", "shape" : [1], "datatype" : "BYTES"}]}' > request.json
+echo -n '{"inputs" : [{"name" : "0", "shape" : [1], "datatype" : "BYTES"}]}' > request.json
 stat --format=%s request.json
 66
 printf "%x\n" `stat -c "%s" ./image.jpeg`
@@ -782,7 +782,7 @@ int main(int argc, char** argv) {
 ```{code} bash
 curl -X POST http://localhost:9000/v2/models/model_name/infer
 -H 'Content-Type: application/json'
--d '{"inputs" : [ {"name" : "input_name", "shape" : [ 1 ], "datatype"  : "BYTES", "data" : ["<string>"]} ]}
+-d '{"inputs" : [ {"name" : "input_name", "shape" : [ 1 ], "datatype"  : "BYTES", "data" : ["<string>"]} ]}'
 ```
 :::
 ::::
@@ -810,7 +810,7 @@ infer_input.set_data_from_numpy(data)
 
 client.start_stream(callback=callback)
 
-for _ in range(5):  # re-use opened stream
+for _ in range(5):  # reuse opened stream
     client.async_stream_infer(
         model_name="model_name",
         inputs=[infer_input],
@@ -821,4 +821,4 @@ client.stop_stream()
 :::
 ::::
 
-For complete usage examples see [Kserve samples](https://github.com/openvinotoolkit/model_server/tree/releases/2023/3/client/python/kserve-api/samples).
+For complete usage examples see [Kserve samples](https://github.com/openvinotoolkit/model_server/tree/releases/2025/3/client/python/kserve-api/samples).

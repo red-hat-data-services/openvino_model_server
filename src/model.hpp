@@ -36,7 +36,7 @@ namespace ovms {
 class FileSystem;
 class GlobalSequencesViewer;
 class ModelInstance;
-class PipelineDefinition;
+struct NotifyReceiver;
 class MetricConfig;
 class MetricRegistry;
 class Status;
@@ -45,7 +45,7 @@ class Status;
 class Model {
 private:
     /**
-     * @brief Mutex for protecting concurrent modfying and accessing modelVersions
+     * @brief Mutex for protecting concurrent modifying and accessing modelVersions
      */
     mutable std::shared_mutex modelVersionsMtx;
 
@@ -172,11 +172,7 @@ public:
          *
          * @return specific model version
          */
-    const std::shared_ptr<ModelInstance> getModelInstanceByVersion(const model_version_t& version) const {
-        std::shared_lock lock(modelVersionsMtx);
-        auto it = modelVersions.find(version);
-        return it != modelVersions.end() ? it->second : nullptr;
-    }
+    const std::shared_ptr<ModelInstance> getModelInstanceByVersion(const model_version_t& version) const;
 
     /**
          * @brief Adds new versions of ModelInstance
@@ -185,7 +181,7 @@ public:
          *
          * @return status
          */
-    Status addVersions(std::shared_ptr<model_versions_t> versions, ovms::ModelConfig& config, std::shared_ptr<FileSystem>& fs, ov::Core& ieCore, std::shared_ptr<model_versions_t> versionsFailed, MetricRegistry* registry = nullptr, const MetricConfig* metricConfig = nullptr);
+    Status addVersions(std::shared_ptr<model_versions_t>& versions, ovms::ModelConfig& config, std::shared_ptr<FileSystem>& fs, ov::Core& ieCore, std::shared_ptr<model_versions_t>& versionsFailed, MetricRegistry* registry = nullptr, const MetricConfig* metricConfig = nullptr);
 
     /**
          * @brief Retires versions of Model
@@ -194,7 +190,7 @@ public:
          *
          * @return status
          */
-    Status retireVersions(std::shared_ptr<model_versions_t> versions);
+    Status retireVersions(std::shared_ptr<model_versions_t>& versions);
 
     /**
          * @brief Cleans up versions of Model
@@ -203,7 +199,7 @@ public:
          *
          * @return status
          */
-    Status cleanupFailedLoad(std::shared_ptr<model_versions_t> versions);
+    Status cleanupFailedLoad(std::shared_ptr<model_versions_t>& versions);
 
     /**
          * @brief Retires all versions of Model
@@ -222,10 +218,10 @@ public:
          *
          * @return status
          */
-    Status reloadVersions(std::shared_ptr<model_versions_t> versions, ovms::ModelConfig& config, std::shared_ptr<FileSystem>& fs, ov::Core& ieCore, std::shared_ptr<model_versions_t> versionsFailed);
+    Status reloadVersions(std::shared_ptr<model_versions_t>& versions, ovms::ModelConfig& config, std::shared_ptr<FileSystem>& fs, ov::Core& ieCore, std::shared_ptr<model_versions_t>& versionsFailed);
 
-    void subscribe(PipelineDefinition& pd);
-    void unsubscribe(PipelineDefinition& pd);
+    void subscribe(NotifyReceiver& pd);
+    void unsubscribe(NotifyReceiver& pd);
     /**
          * @brief Set the custom loader name
          *
@@ -235,7 +231,7 @@ public:
 
     bool isAnyVersionSubscribed() const;
 
-    void setCustomLoaderName(const std::string name) {
+    void setCustomLoaderName(const std::string& name) {
         customLoaderName = name;
     }
 

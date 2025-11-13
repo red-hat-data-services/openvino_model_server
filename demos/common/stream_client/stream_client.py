@@ -19,10 +19,12 @@ import cv2
 from functools import partial
 import queue
 import threading
+from functools import reduce
 import tritonclient.grpc as grpcclient
 import numpy as np
 import ffmpeg
 import sys
+import time
 
 class Datatype:
     def dtype(self):
@@ -119,7 +121,7 @@ class StreamClient:
         self.exact = exact
         self.benchmark = benchmark
 
-        self.req_q = queue.Queue(max_inflight_packets)
+        self.req_s = threading.Semaphore(max_inflight_packets)
 
     def grab_frame(self):
         success, frame = self.cap.read()
@@ -138,19 +140,18 @@ class StreamClient:
     dropped_frames = 0
     frames = 0
     def callback(self, frame, i, timestamp, result, error):
+        self.req_s.release()
         if error is not None:
             if self.benchmark:
                 self.dropped_frames += 1
             if self.verbose:
                 print(error)
-            return
         if i == None:
             i = result.get_response().parameters["OVMS_MP_TIMESTAMP"].int64_param
         if timestamp == None:
             timestamp = result.get_response().parameters["OVMS_MP_TIMESTAMP"].int64_param
         frame = self.postprocess_callback(frame, result)
         self.pq.put((i, frame, timestamp))
-        self.req_q.get()
 
     def display(self):
         displayed_frame_id = 0 
@@ -163,19 +164,14 @@ class StreamClient:
                     break
                 self.output_backend.write(received_frame)
                 if self.benchmark:
-                    self.inference_time.insert(displayed_frame_id, (self.get_timestamp() if self.streaming_api else time.time()) - timestamp)
+                    self.inference_time.insert(displayed_frame_id, timestamp)
                     self.frames += 1
                 if self.exact:
                     displayed_frame_id += 1
                 else:
-                    if self.benchmark:
-                        self.dropped_frames += sent_frame_id - displayed_frame_id
                     displayed_frame_id = sent_frame_id
             elif self.exact:
                 self.pq.put((sent_frame_id, received_frame, timestamp))
-
-    def get_timestamp(self) -> int:
-        return int(cv2.getTickCount() / cv2.getTickFrequency() * 1e6)
 
     def start(self, *, ovms_address : str, input_name : str, model_name : str, datatype : Datatype = FP32(), batch = True, limit_stream_duration : int = 0, limit_frames : int = 0, streaming_api: bool = False):
         """
@@ -210,10 +206,11 @@ class StreamClient:
         display_th = threading.Thread(target=self.display)
         display_th.start()
         test_frame = self.grab_frame()
-        np_test_frame = np.array(test_frame, dtype=datatype.dtype())
+
         if test_frame is None:
             self. force_exit = True
         else:
+            np_test_frame = np.array(test_frame, dtype=datatype.dtype())
             if self.width is None:
                 self.width = np_test_frame.shape[1]
             if self.height is None:
@@ -227,19 +224,18 @@ class StreamClient:
         total_time_start = time.time()
         try:
             while not self.force_exit:
-                self.req_q.put(frame_number)
-                timestamp = time.time()
+                self.req_s.acquire()
                 frame = self.grab_frame()
                 if frame is not None:
                     np_frame = np.array([frame], dtype=datatype.dtype()) if batch else np.array(frame, dtype=datatype.dtype())
                     inputs=[grpcclient.InferInput(input_name, np_frame.shape, datatype.string())]
                     inputs[0].set_data_from_numpy(np_frame)
                     if streaming_api:
-                        triton_client.async_stream_infer(model_name=model_name, inputs=inputs, parameters={"OVMS_MP_TIMESTAMP":self.get_timestamp()})
+                        triton_client.async_stream_infer(model_name=model_name, inputs=inputs)
                     else:
                         triton_client.async_infer(
                             model_name=model_name,
-                            callback=partial(self.callback, frame, frame_number, timestamp),
+                            callback=partial(self.callback, frame, frame_number, time.time()),
                             inputs=inputs)
                     frame_number += 1
                 if limit_stream_duration > 0 and time.time() - total_time_start > limit_stream_duration:
@@ -258,4 +254,5 @@ class StreamClient:
         self.output_backend.release()
         total_time = time.time() - total_time_start
         if self.benchmark:
-            print(f"{{\"inference_time\": {sum(self.inference_time)/frame_number}, \"dropped_frames\": {self.dropped_frames}, \"frames\": {self.frames}, \"fps\": {self.frames/total_time}, \"total_time\": {total_time}, \"sent_all_frames\": {sent_all_frames}}}")
+            inference_time_sum = reduce(lambda x, y: x + y, [abs(self.inference_time[x] - self.inference_time[x+1]) for x in range(len(self.inference_time)-1)])
+            print(f"{{\"average_inference_latency\": {(inference_time_sum)/len(self.inference_time)/1e6}, \"dropped_frames\": {self.dropped_frames}, \"frames\": {self.frames}, \"fps\": {self.frames/(total_time)}, \"total_time\": {total_time}, \"sent_all_frames\": {sent_all_frames}}}")

@@ -26,15 +26,19 @@
 #include <gtest/gtest.h>
 #include <stdlib.h>
 
-#include "../deserialization.hpp"
+#include "../statefulrequestprocessor.hpp"
+#include "../tfs_frontend/deserialization.hpp"
+#include "../deserialization_common.hpp"
 #include "../executingstreamidguard.hpp"
 #include "../get_model_metadata_impl.hpp"
 #include "../global_sequences_viewer.hpp"
+#include "../itensorfactory.hpp"
 #include "../modelinstanceunloadguard.hpp"
 #include "../modelversion.hpp"
 #include "../ov_utils.hpp"
+#include "../regularovtensorfactory.hpp"
 #include "../sequence_processing_spec.hpp"
-#include "../serialization.hpp"
+#include "../tfs_frontend/serialization.hpp"
 #include "../statefulmodelinstance.hpp"
 #include "../timer.hpp"
 #include "stateful_test_utils.hpp"
@@ -116,7 +120,7 @@ public:
         // Prepare manager
         modelPath = directoryPath + "/dummy/";
         SetUpConfig(modelStatefulConfig);
-        std::filesystem::copy("/ovms/src/test/dummy", modelPath, std::filesystem::copy_options::recursive);
+        std::filesystem::copy(getGenericFullPathForSrcTest("/ovms/src/test/dummy"), modelPath, std::filesystem::copy_options::recursive);
         modelInput = {{DUMMY_MODEL_INPUT_NAME,
             std::tuple<ovms::signed_shape_t, ovms::Precision>{{1, 10}, ovms::Precision::FP32}}};
     }
@@ -156,7 +160,15 @@ public:
         auto status = sp.extractRequestParameters(request);
         if (!status.ok())
             return status;
-        return validate(request);
+        return ovms::request_validation_utils::validate(
+            *request,
+            this->getInputsInfo(),
+            this->getOutputsInfo(),
+            this->getName(),
+            this->getVersion(),
+            this->getOptionalInputNames(),
+            this->getModelConfig().getBatchingMode(),
+            this->getModelConfig().getShapes());
     }
 };
 
@@ -190,6 +202,7 @@ public:
     }
 
     // This method must be kept up to date with StatefulModelInstance::infer for tests to function properly.
+    // TODO @atobisze to review check inference_executor.hpp infer()
     ovms::Status infer(const tensorflow::serving::PredictRequest* requestProto,
         tensorflow::serving::PredictResponse* responseProto,
         std::unique_ptr<ovms::ModelInstanceUnloadGuard>& modelUnloadGuardPtr,
@@ -215,7 +228,15 @@ public:
         auto status = requestProcessor.extractRequestParameters(requestProto);
         if (!status.ok())
             return status;
-        status = validate(requestProto);
+        status = ovms::request_validation_utils::validate(
+            *requestProto,
+            this->getInputsInfo(),
+            this->getOutputsInfo(),
+            this->getName(),
+            this->getVersion(),
+            this->getOptionalInputNames(),
+            this->getModelConfig().getBatchingMode(),
+            this->getModelConfig().getShapes());
         if (!status.ok())
             return status;
 
@@ -247,7 +268,9 @@ public:
         ovms::InputSink<ov::InferRequest&> inputSink(inferRequest);
         (void)inputSink;
         bool isPipeline = false;
-        status = ovms::deserializePredictRequest<ovms::ConcreteTensorProtoDeserializator>(*requestProto, getInputsInfo(), inputSink, isPipeline);
+        std::unordered_map<int, std::shared_ptr<ovms::IOVTensorFactory>> factories;
+        factories.emplace(OVMS_BUFFERTYPE_CPU, std::make_shared<ovms::RegularOVTensorFactory>());
+        status = ovms::deserializePredictRequest < ovms::ConcreteTensorProtoDeserializator, ovms::InputSink<ov::InferRequest&>(*requestProto, getInputsInfo(), getOutputsInfo(), inputSink, isPipeline, factories);
         if (!status.ok())
             return status;
         timer.stop(DESERIALIZE);
@@ -311,7 +334,7 @@ void RunStatefulPredict(const std::shared_ptr<ovms::ModelInstance> modelInstance
     std::unique_ptr<ovms::ModelInstanceUnloadGuard> unload_guard;
     tensorflow::serving::PredictResponse response;
     // Do the inference
-    ASSERT_EQ(modelInstance->infer(&request, &response, unload_guard), ovms::StatusCode::OK);
+    ASSERT_EQ(ovms::infer(*modelInstance, &request, &response, unload_guard), ovms::StatusCode::OK);
     // Check response
     EXPECT_TRUE(CheckSequenceIdResponse(response, seqId));
 }
@@ -349,7 +372,7 @@ void RunStatefulPredicts(const std::shared_ptr<ovms::ModelInstance> modelInstanc
 
         tensorflow::serving::PredictResponse response;
         // Do the inference
-        ASSERT_EQ(modelInstance->infer(&request, &response, unload_guard), ovms::StatusCode::OK);
+        ASSERT_EQ(ovms::infer(*modelInstance, &request, &response, unload_guard), ovms::StatusCode::OK);
         // Check response
         EXPECT_TRUE(CheckSequenceIdResponse(response, seqId));
     }
@@ -981,14 +1004,14 @@ TEST_F(StatefulModelInstanceTempDir, statefulInferSequenceMissing) {
     setRequestSequenceControl(&request, ovms::SEQUENCE_END);
 
     // Do the inference
-    ASSERT_EQ(modelInstance->infer(&request, &response, unload_guard), ovms::StatusCode::SEQUENCE_MISSING);
+    ASSERT_EQ(ovms::infer(*modelInstance, &request, &response, unload_guard), ovms::StatusCode::SEQUENCE_MISSING);
 
     preparePredictRequest(request, modelInput);
     setRequestSequenceId(&request, seqId);
     setRequestSequenceControl(&request, ovms::NO_CONTROL_INPUT);
 
     // Do the inference
-    ASSERT_EQ(modelInstance->infer(&request, &response, unload_guard), ovms::StatusCode::SEQUENCE_MISSING);
+    ASSERT_EQ(ovms::infer(*modelInstance, &request, &response, unload_guard), ovms::StatusCode::SEQUENCE_MISSING);
 }
 
 TEST_F(StatefulModelInstanceTempDir, statefulInferSequenceIdNotProvided) {
@@ -1005,13 +1028,13 @@ TEST_F(StatefulModelInstanceTempDir, statefulInferSequenceIdNotProvided) {
     setRequestSequenceControl(&request, ovms::SEQUENCE_END);
 
     // Do the inference
-    ASSERT_EQ(modelInstance->infer(&request, &response, unload_guard), ovms::StatusCode::SEQUENCE_ID_NOT_PROVIDED);
+    ASSERT_EQ(ovms::infer(*modelInstance, &request, &response, unload_guard), ovms::StatusCode::SEQUENCE_ID_NOT_PROVIDED);
 
     preparePredictRequest(request, modelInput);
     setRequestSequenceControl(&request, ovms::NO_CONTROL_INPUT);
 
     // Do the inference
-    ASSERT_EQ(modelInstance->infer(&request, &response, unload_guard), ovms::StatusCode::SEQUENCE_ID_NOT_PROVIDED);
+    ASSERT_EQ(ovms::infer(*modelInstance, &request, &response, unload_guard), ovms::StatusCode::SEQUENCE_ID_NOT_PROVIDED);
 }
 
 TEST_F(StatefulModelInstanceTempDir, statefulInferSequenceIdNotProvided2) {
@@ -1027,13 +1050,13 @@ TEST_F(StatefulModelInstanceTempDir, statefulInferSequenceIdNotProvided2) {
     preparePredictRequest(request, modelInput);
 
     // Do the inference
-    ASSERT_EQ(modelInstance->infer(&request, &response, unload_guard), ovms::StatusCode::SEQUENCE_ID_NOT_PROVIDED);
+    ASSERT_EQ(ovms::infer(*modelInstance, &request, &response, unload_guard), ovms::StatusCode::SEQUENCE_ID_NOT_PROVIDED);
 
     preparePredictRequest(request, modelInput);
     setRequestSequenceControl(&request, 99);
 
     // Do the inference
-    ASSERT_EQ(modelInstance->infer(&request, &response, unload_guard), ovms::StatusCode::INVALID_SEQUENCE_CONTROL_INPUT);
+    ASSERT_EQ(ovms::infer(*modelInstance, &request, &response, unload_guard), ovms::StatusCode::INVALID_SEQUENCE_CONTROL_INPUT);
 }
 
 TEST_F(StatefulModelInstanceTempDir, statefulInferIdAlreadyExists) {
@@ -1051,8 +1074,8 @@ TEST_F(StatefulModelInstanceTempDir, statefulInferIdAlreadyExists) {
     setRequestSequenceId(&request, seqId);
     setRequestSequenceControl(&request, ovms::SEQUENCE_START);
 
-    ASSERT_EQ(modelInstance->infer(&request, &response, unload_guard), ovms::StatusCode::OK);
-    ASSERT_EQ(modelInstance->infer(&request, &response, unload_guard), ovms::StatusCode::SEQUENCE_ALREADY_EXISTS);
+    ASSERT_EQ(ovms::infer(*modelInstance, &request, &response, unload_guard), ovms::StatusCode::OK);
+    ASSERT_EQ(ovms::infer(*modelInstance, &request, &response, unload_guard), ovms::StatusCode::SEQUENCE_ALREADY_EXISTS);
 }
 
 TEST_F(StatefulModelInstanceTempDir, statefulInferStandardFlow) {
@@ -1071,7 +1094,7 @@ TEST_F(StatefulModelInstanceTempDir, statefulInferStandardFlow) {
     setRequestSequenceControl(&firstRequest, ovms::SEQUENCE_START);
 
     // Do the inference
-    ASSERT_EQ(modelInstance->infer(&firstRequest, &firstResponse, unload_guard), ovms::StatusCode::OK);
+    ASSERT_EQ(ovms::infer(*modelInstance, &request, &response, unload_guard), ovms::StatusCode::OK);
 
     // Check response
     EXPECT_TRUE(CheckSequenceIdResponse(firstResponse, seqId));
@@ -1083,7 +1106,7 @@ TEST_F(StatefulModelInstanceTempDir, statefulInferStandardFlow) {
 
     tensorflow::serving::PredictResponse intermediateResponse;
     // Do the inference
-    ASSERT_EQ(modelInstance->infer(&intermediateRequest, &intermediateResponse, unload_guard), ovms::StatusCode::OK);
+    ASSERT_EQ(ovms::infer(*modelInstance, &intermediateRequest, &intermediateResponse, unload_guard), ovms::StatusCode::OK);
     // Check response
     EXPECT_TRUE(CheckSequenceIdResponse(intermediateResponse, seqId));
 
@@ -1094,7 +1117,7 @@ TEST_F(StatefulModelInstanceTempDir, statefulInferStandardFlow) {
 
     tensorflow::serving::PredictResponse lastResponse;
     // Do the inference
-    ASSERT_EQ(modelInstance->infer(&lastRequest, &lastResponse, unload_guard), ovms::StatusCode::OK);
+    ASSERT_EQ(ovms::infer(*modelInstance, &lastRequest, &lastRequest, unload_guard), ovms::StatusCode::OK);
     // Check response
     EXPECT_TRUE(CheckSequenceIdResponse(lastResponse, seqId));
 }
@@ -1432,7 +1455,7 @@ TEST_F(StatefulModelInstanceTest, extractSequenceId_OK) {
     proto.mutable_tensor_shape()->add_dim()->set_size(1);
     proto.add_uint64_val(5000000000);
     uint64_t sequenceId = 0;
-    EXPECT_EQ(modelInstance->extractSequenceId(proto, sequenceId), ovms::StatusCode::OK);
+    EXPECT_EQ(ovms::extractSequenceId(proto, sequenceId), ovms::StatusCode::OK);
     EXPECT_EQ(sequenceId, 5000000000);
 }
 
@@ -1441,7 +1464,7 @@ TEST_F(StatefulModelInstanceTest, extractSequenceId_NoTensorShape) {
     proto.set_dtype(tensorflow::DataType::DT_UINT64);
     proto.add_uint64_val(5000000000);
     uint64_t sequenceId = 0;
-    EXPECT_EQ(modelInstance->extractSequenceId(proto, sequenceId), ovms::StatusCode::SPECIAL_INPUT_NO_TENSOR_SHAPE);
+    EXPECT_EQ(ovms::extractSequenceId(proto, sequenceId), ovms::StatusCode::SPECIAL_INPUT_NO_TENSOR_SHAPE);
     EXPECT_EQ(sequenceId, 0);
 }
 
@@ -1452,7 +1475,7 @@ TEST_F(StatefulModelInstanceTest, extractSequenceId_WrongTensorShapeDims) {
     proto.mutable_tensor_shape()->add_dim()->set_size(1);
     proto.add_uint64_val(5000000000);
     uint64_t sequenceId = 0;
-    EXPECT_EQ(modelInstance->extractSequenceId(proto, sequenceId), ovms::StatusCode::INVALID_NO_OF_SHAPE_DIMENSIONS);
+    EXPECT_EQ(ovms::extractSequenceId(proto, sequenceId), ovms::StatusCode::INVALID_NO_OF_SHAPE_DIMENSIONS);
     EXPECT_EQ(sequenceId, 0);
 }
 
@@ -1462,7 +1485,7 @@ TEST_F(StatefulModelInstanceTest, extractSequenceId_WrongTensorShape) {
     proto.mutable_tensor_shape()->add_dim()->set_size(2);
     proto.add_uint64_val(5000000000);
     uint64_t sequenceId = 0;
-    EXPECT_EQ(modelInstance->extractSequenceId(proto, sequenceId), ovms::StatusCode::INVALID_SHAPE);
+    EXPECT_EQ(ovms::extractSequenceId(proto, sequenceId), ovms::StatusCode::INVALID_SHAPE);
     EXPECT_EQ(sequenceId, 0);
 }
 
@@ -1474,7 +1497,7 @@ TEST_F(StatefulModelInstanceTest, extractSequenceId_WrongValField) {
         proto.mutable_tensor_shape()->add_dim()->set_size(1);
         proto.add_uint32_val(1);
         uint64_t sequenceId = 0;
-        EXPECT_EQ(modelInstance->extractSequenceId(proto, sequenceId), ovms::StatusCode::SEQUENCE_ID_BAD_TYPE);
+        EXPECT_EQ(ovms::extractSequenceId(proto, sequenceId), ovms::StatusCode::SEQUENCE_ID_BAD_TYPE);
         EXPECT_EQ(sequenceId, 0);
     }
     {
@@ -1485,7 +1508,7 @@ TEST_F(StatefulModelInstanceTest, extractSequenceId_WrongValField) {
         proto.add_uint64_val(1);
         proto.add_uint64_val(2);
         uint64_t sequenceId = 0;
-        EXPECT_EQ(modelInstance->extractSequenceId(proto, sequenceId), ovms::StatusCode::SEQUENCE_ID_BAD_TYPE);
+        EXPECT_EQ(ovms::extractSequenceId(proto, sequenceId), ovms::StatusCode::SEQUENCE_ID_BAD_TYPE);
         EXPECT_EQ(sequenceId, 0);
     }
 }
@@ -1496,7 +1519,7 @@ TEST_F(StatefulModelInstanceTest, extractSequenceControlInput_OK) {
     proto.mutable_tensor_shape()->add_dim()->set_size(1);
     proto.add_uint32_val(1);
     uint32_t sequenceControlInput = 0;
-    EXPECT_EQ(modelInstance->extractSequenceControlInput(proto, sequenceControlInput), ovms::StatusCode::OK);
+    EXPECT_EQ(ovms::extractSequenceControlInput(proto, sequenceControlInput), ovms::StatusCode::OK);
     EXPECT_EQ(sequenceControlInput, 1);
 }
 
@@ -1505,7 +1528,7 @@ TEST_F(StatefulModelInstanceTest, extractSequenceControlInput_NoTensorShape) {
     proto.set_dtype(tensorflow::DataType::DT_UINT32);
     proto.add_uint32_val(1);
     uint32_t sequenceControlInput = 0;
-    EXPECT_EQ(modelInstance->extractSequenceControlInput(proto, sequenceControlInput), ovms::StatusCode::SPECIAL_INPUT_NO_TENSOR_SHAPE);
+    EXPECT_EQ(ovms::extractSequenceControlInput(proto, sequenceControlInput), ovms::StatusCode::SPECIAL_INPUT_NO_TENSOR_SHAPE);
     EXPECT_EQ(sequenceControlInput, 0);
 }
 
@@ -1516,7 +1539,7 @@ TEST_F(StatefulModelInstanceTest, extractSequenceControlInput_WrongTensorShapeDi
     proto.mutable_tensor_shape()->add_dim()->set_size(1);
     proto.add_uint32_val(1);
     uint32_t sequenceControlInput = 0;
-    EXPECT_EQ(modelInstance->extractSequenceControlInput(proto, sequenceControlInput), ovms::StatusCode::INVALID_NO_OF_SHAPE_DIMENSIONS);
+    EXPECT_EQ(ovms::extractSequenceControlInput(proto, sequenceControlInput), ovms::StatusCode::INVALID_NO_OF_SHAPE_DIMENSIONS);
     EXPECT_EQ(sequenceControlInput, 0);
 }
 
@@ -1526,7 +1549,7 @@ TEST_F(StatefulModelInstanceTest, extractSequenceControlInput_WrongTensorShape) 
     proto.mutable_tensor_shape()->add_dim()->set_size(2);
     proto.add_uint32_val(1);
     uint32_t sequenceControlInput = 0;
-    EXPECT_EQ(modelInstance->extractSequenceControlInput(proto, sequenceControlInput), ovms::StatusCode::INVALID_SHAPE);
+    EXPECT_EQ(ovms::extractSequenceControlInput(proto, sequenceControlInput), ovms::StatusCode::INVALID_SHAPE);
     EXPECT_EQ(sequenceControlInput, 0);
 }
 
@@ -1538,7 +1561,7 @@ TEST_F(StatefulModelInstanceTest, extractSequenceControlInput_WrongValField) {
         proto.mutable_tensor_shape()->add_dim()->set_size(1);
         proto.add_uint64_val(1);
         uint32_t sequenceControlInput = 0;
-        EXPECT_EQ(modelInstance->extractSequenceControlInput(proto, sequenceControlInput), ovms::StatusCode::SEQUENCE_CONTROL_INPUT_BAD_TYPE);
+        EXPECT_EQ(ovms::extractSequenceControlInput(proto, sequenceControlInput), ovms::StatusCode::SEQUENCE_CONTROL_INPUT_BAD_TYPE);
         EXPECT_EQ(sequenceControlInput, 0);
     }
     {
@@ -1549,7 +1572,7 @@ TEST_F(StatefulModelInstanceTest, extractSequenceControlInput_WrongValField) {
         proto.add_uint32_val(1);
         proto.add_uint32_val(2);
         uint32_t sequenceControlInput = 0;
-        EXPECT_EQ(modelInstance->extractSequenceControlInput(proto, sequenceControlInput), ovms::StatusCode::SEQUENCE_CONTROL_INPUT_BAD_TYPE);
+        EXPECT_EQ(ovms::extractSequenceControlInput(proto, sequenceControlInput), ovms::StatusCode::SEQUENCE_CONTROL_INPUT_BAD_TYPE);
         EXPECT_EQ(sequenceControlInput, 0);
     }
 }

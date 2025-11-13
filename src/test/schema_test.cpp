@@ -13,10 +13,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 //*****************************************************************************
+#include <array>
+
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
 #include "../schema.hpp"
+#include "../status.hpp"
 
 TEST(SchemaTest, PipelineConfigMatchingSchema) {
     const char* pipelineConfigMatchingSchema = R"(
@@ -751,6 +754,182 @@ TEST(SchemaTest, parseModelMappingWhenConfigIsNotJson) {
     auto result = ovms::validateJsonAgainstSchema(mappingConfigIsNotAJsonParsed, ovms::MODELS_MAPPING_SCHEMA);
     EXPECT_EQ(result, ovms::StatusCode::JSON_INVALID);
 }
+
+using SchemaTestCase_t = std::tuple<std::string, std::string, std::string>;
+using testing::HasSubstr;
+enum SchemaTestCasePart {
+    NAME = 0,
+    CONFIG = 1,
+    ERROR_MSG = 2
+};
+
+class ConfigSchema : public ::testing::TestWithParam<SchemaTestCase_t> {};
+TEST_P(ConfigSchema, DoubledFields) {
+    if (std::get<SchemaTestCasePart::ERROR_MSG>(GetParam()).find("SKIPPED") != std::string::npos)
+        GTEST_SKIP();
+    const char* invalidConfig = std::get<SchemaTestCasePart::CONFIG>(GetParam()).c_str();
+    rapidjson::Document invalidConfigDocument;
+    invalidConfigDocument.Parse(invalidConfig);
+    auto result = ovms::validateJsonAgainstSchema(invalidConfigDocument, ovms::MODELS_CONFIG_SCHEMA.c_str(), true);
+    EXPECT_EQ(result, ovms::StatusCode::JSON_INVALID) << std::get<SchemaTestCasePart::CONFIG>(GetParam()) << "\n"
+                                                      << result.string();
+    EXPECT_THAT(result.string(), testing::HasSubstr(std::get<SchemaTestCasePart::ERROR_MSG>(GetParam())));
+}
+
+const uint32_t CONFIGS = 9;
+std::array<SchemaTestCase_t, CONFIGS> DOUBLED_MODEL_CONFIG_KEYS_CONFIGS = {
+    std::tuple(std::string("Doubled_ModelConfig"), std::string(R"(
+      {
+          "model_config_list": [
+              {
+                  "config": {
+                      "name": "dummy",
+                      "base_path": "dummy_path"
+                  },
+                  "config": {
+                      "name": "dummy2",
+                      "base_path": "dummy_path"
+                  }
+              }
+          ]
+  })"),
+        std::string("#/definitions/model_config. Keyword:maxProperties Key: #/model_config_list/0")),
+    std::tuple(std::string("Doubled_ModelConfigList"), std::string(R"(
+      {
+          "model_config_list": [],
+          "model_config_list": [
+              {
+                  "config": {
+                      "name": "dummy",
+                      "base_path": "dummy_path"
+                  }
+              }
+          ]
+  })"),
+        std::string("SKIPPED")),
+    std::tuple(std::string("Doubled_CustomLoaderConfig"), std::string(R"(
+      {
+          "model_config_list": [],
+          "custom_loader_config_list": [
+             {
+                 "config":{ "loader_name": "A", "library_path":"B"},
+                 "config":{ "loader_name": "A", "library_path":"B"}
+             }
+          ]
+  })"),
+        std::string("#/definitions/custom_loader_config. Keyword:maxProperties Key: #/custom_loader_config_list/0")),
+    std::tuple(std::string("Doubled_ModelConfigVersionPolicyAll"), std::string(R"(
+      {
+          "model_config_list": [
+              {
+                  "config": {
+                      "name": "dummy",
+                      "base_path": "dummy_path",
+                      "model_version_policy": {
+                          "all": {},
+                          "all": {}
+                      }
+                  }
+              }
+          ]
+  })"),
+        std::string("#/definitions/model_version_policy")),
+    std::tuple(std::string("Doubled_ModelConfigVersionPolicySpecific"), std::string(R"(
+      {
+          "model_config_list": [
+              {
+                  "config": {
+                      "name": "dummy",
+                      "base_path": "dummy_path",
+                      "model_version_policy": {
+                          "specific": {
+                              "versions": [1, 2]
+                          },
+                          "specific": {
+                              "versions": [1, 3]
+                          }
+                      }
+                  }
+              }
+          ]
+  })"),
+        std::string("#/definitions/model_version_policy")),
+    std::tuple(std::string("Doubled_ModelConfigVersionPolicySpecificVersions"), std::string(R"(
+      {
+          "model_config_list": [
+              {
+                  "config": {
+                      "name": "dummy",
+                      "base_path": "dummy_path",
+                      "model_version_policy": {
+                          "specific": {
+                              "versions": [1, 2],
+                              "versions": [1, 2]
+                          }
+                      }
+                  }
+              }
+          ]
+  })"),
+        std::string("#/definitions/model_version_policy")),
+    std::tuple(std::string("Doubled_ModelConfigVersionPolicyLatest"), std::string(R"(
+      {
+          "model_config_list": [
+              {
+                  "config": {
+                      "name": "dummy",
+                      "base_path": "dummy_path",
+                      "model_version_policy": {
+                          "latest": {
+                              "num_versions":1
+                          },
+                          "latest": {
+                              "num_versions":1
+                          }
+                      }
+                  }
+              }
+          ]
+  })"),
+        std::string("#/definitions/model_version_policy")),
+    std::tuple(std::string("Doubled_ModelConfigVersionPolicyLatestNumVersions"), std::string(R"(
+      {
+          "model_config_list": [
+              {
+                  "config": {
+                      "name": "dummy",
+                      "base_path": "dummy_path",
+                      "model_version_policy": {
+                          "latest": {
+                              "num_versions":1,
+                              "num_versions":2
+                          }
+                      }
+                  }
+              }
+          ]
+  })"),
+        std::string("#/definitions/model_version_policy")),
+    std::tuple(std::string("Doubled_MonitoringMetrics"), std::string(R"(
+      {
+          "model_config_list": [],
+          "monitoring": {
+              "metrics": {
+                  "enable" : true
+              },
+              "metrics": {
+                  "enable" : true
+              }
+          }
+  })"),
+        std::string("#/properties/monitoring. Keyword:maxProperties Key: #/monitoring"))};
+
+INSTANTIATE_TEST_SUITE_P(Doubled,
+    ConfigSchema,
+    ::testing::ValuesIn(DOUBLED_MODEL_CONFIG_KEYS_CONFIGS),
+    [](const ::testing::TestParamInfo<ConfigSchema::ParamType>& info) {
+        return std::get<SchemaTestCasePart::NAME>(info.param);
+    });
 
 TEST(SchemaTest, ModelConfigNireqNegative) {
     const char* modelConfigNireqNegative = R"(
@@ -1794,9 +1973,30 @@ TEST(SchemaTest, MediapipeConfigPositive) {
         "mediapipe_config_list": [
         {
             "name": "dummy_model",
-            "graph_path": "dummy_path"
+            "graph_path": "graph.pbtxt",
+            "base_path": "dummy_path_base"
         }
         ]
+    })";
+
+    rapidjson::Document configDoc;
+    configDoc.Parse(mediapipeConfigPositive);
+    auto result = ovms::validateJsonAgainstSchema(configDoc, ovms::MODELS_CONFIG_SCHEMA.c_str());
+    EXPECT_EQ(result, ovms::StatusCode::OK);
+}
+
+TEST(SchemaTest, MediapipeConfigInModelConfigPositive) {
+    const char* mediapipeConfigPositive = R"(
+    {
+        "model_config_list": [
+        {
+            "config": {
+                "name": "dummy",
+                "base_path": "dummy_path",
+                "graph_path": "dummy_path.pbtxt"
+            }
+        }
+    ]
     })";
 
     rapidjson::Document configDoc;

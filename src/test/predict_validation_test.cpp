@@ -20,6 +20,7 @@
 #include <gtest/gtest.h>
 
 #include "../kfs_frontend/kfs_grpc_inference_service.hpp"
+#include "../tfs_frontend/tfs_utils.hpp"
 #include "../modelconfig.hpp"
 #include "../modelinstance.hpp"
 #include "../predict_request_validation_utils.hpp"
@@ -39,6 +40,7 @@ protected:
     tensorflow::serving::PredictRequest request;
     ovms::ModelConfig modelConfig{"model_name", "model_path"};
     ovms::tensor_map_t servableInputs;
+    ovms::tensor_map_t servableOutputs = ovms::tensor_map_t({{"SOME_OUTPUT", std::make_shared<ovms::TensorInfo>("OUTPUT", ovms::Precision::FP32, ovms::shape_t{1, 1, 1, 1}, ovms::Layout{"NHWC"})}});  // not used for TFS
 
     void SetUp() override {
         ieCore = std::make_unique<ov::Core>();
@@ -56,6 +58,7 @@ protected:
         });
 
         ON_CALL(*instance, getInputsInfo()).WillByDefault(ReturnRef(servableInputs));
+        ON_CALL(*instance, getOutputsInfo()).WillByDefault(ReturnRef(servableOutputs));
         ON_CALL(*instance, getBatchSize()).WillByDefault(Return(1));
         ON_CALL(*instance, getModelConfig()).WillByDefault(ReturnRef(modelConfig));
 
@@ -102,7 +105,7 @@ TEST_F(TfsPredictValidation, RequestWithScalar) {
         std::make_shared<ovms::TensorInfo>("Input_FP32_Scalar", ovms::Precision::FP32, ovms::shape_t{}, ovms::Layout{"..."})}});
     preparePredictRequest(request,
         {{"Input_FP32_Scalar",
-            std::tuple<ovms::signed_shape_t, ovms::Precision>{{}, ovms::Precision::FP32}}});
+            std::tuple<ovms::signed_shape_t, ovms::Precision>{std::vector<int64_t>{}, ovms::Precision::FP32}}});
     auto status = instance->mockValidate(&request);
     EXPECT_TRUE(status.ok());
 }
@@ -333,7 +336,7 @@ TEST_F(TfsPredictValidation, RequestWithScalarBatchSizeAuto) {
 
     // First is incorrect, second is correct, but endpoint is abnormal anyway (scalar with batch size auto)
     preparePredictRequest(request, {{"im_data", {{3, 3, 800, 1344}, ovms::Precision::FP32}},
-                                       {"im_info", {{}, ovms::Precision::FP32}}});
+                                       {"im_info", {std::vector<int64_t>{}, ovms::Precision::FP32}}});
 
     servableInputs.clear();
     servableInputs = ovms::tensor_map_t{
@@ -346,7 +349,7 @@ TEST_F(TfsPredictValidation, RequestWithScalarBatchSizeAuto) {
 
     // First and second is correct, but endpoint is abnormal (scalar with batch size auto)
     preparePredictRequest(request, {{"im_data", {{1, 3, 800, 1344}, ovms::Precision::FP32}},
-                                       {"im_info", {{}, ovms::Precision::FP32}}});
+                                       {"im_info", {std::vector<int64_t>{}, ovms::Precision::FP32}}});
 
     status = instance->mockValidate(&request);
     EXPECT_EQ(status, ovms::StatusCode::INTERNAL_ERROR);
@@ -437,7 +440,7 @@ TEST_F(TfsPredictValidation, RequestWithScalarShapeAuto) {
 
     // First is incorrect, second is correct, expect reshape request due to shape=auto
     preparePredictRequest(request, {{"im_data", {{1, 3, 801, 1344}, ovms::Precision::FP32}},
-                                       {"im_info", {{}, ovms::Precision::FP32}}});
+                                       {"im_info", {std::vector<int64_t>{}, ovms::Precision::FP32}}});
 
     servableInputs.clear();
     servableInputs = ovms::tensor_map_t{
@@ -450,7 +453,7 @@ TEST_F(TfsPredictValidation, RequestWithScalarShapeAuto) {
 
     // First and second is correct, expect no further reshaping due to shape=auto
     preparePredictRequest(request, {{"im_data", {{1, 3, 800, 1344}, ovms::Precision::FP32}},
-                                       {"im_info", {{}, ovms::Precision::FP32}}});
+                                       {"im_info", {std::vector<int64_t>{}, ovms::Precision::FP32}}});
 
     status = instance->mockValidate(&request);
     EXPECT_EQ(status, ovms::StatusCode::OK) << status.string();
@@ -600,7 +603,7 @@ TEST_F(TfsPredictValidation, RequestIncorrectContentSizeForScalarEndpoint) {
         std::make_shared<ovms::TensorInfo>("Input_FP32_Scalar", ovms::Precision::FP32, ovms::shape_t{}, ovms::Layout{"..."})}});
     preparePredictRequest(request,
         {{"Input_FP32_Scalar",
-            std::tuple<ovms::signed_shape_t, ovms::Precision>{{}, ovms::Precision::FP32}}});
+            std::tuple<ovms::signed_shape_t, ovms::Precision>{std::vector<int64_t>{}, ovms::Precision::FP32}}});
 
     auto& input = (*request.mutable_inputs())["Input_FP32_Scalar"];
     *input.mutable_tensor_content() = std::string(sizeof(float) + 1, '1');
@@ -832,6 +835,7 @@ protected:
     tensorflow::serving::PredictRequest request;
     const char* tensorName = DUMMY_MODEL_INPUT_NAME;
     ovms::tensor_map_t mockedInputsInfo;
+    ovms::tensor_map_t mockedOutputsInfo;
 };
 
 TEST_P(TfsPredictValidationPrecision, ValidPrecisions) {
@@ -842,7 +846,7 @@ TEST_P(TfsPredictValidationPrecision, ValidPrecisions) {
             {tensorName,
                 std::tuple<ovms::signed_shape_t, ovms::Precision>{{1, DUMMY_MODEL_INPUT_SIZE}, testedPrecision}},
         });
-    auto status = ovms::request_validation_utils::validate(request, mockedInputsInfo, "dummy", ovms::model_version_t{1});
+    auto status = ovms::request_validation_utils::validate(request, mockedInputsInfo, this->mockedOutputsInfo, "dummy", ovms::model_version_t{1});
     EXPECT_EQ(status, ovms::StatusCode::OK) << "Precision validation failed:"
                                             << toString(testedPrecision)
                                             << " should pass validation";
@@ -863,6 +867,7 @@ protected:
     ::KFSRequest request;
     ovms::ModelConfig modelConfig{"model_name", "model_path"};
     ovms::tensor_map_t servableInputs;
+    ovms::tensor_map_t servableOutputs = ovms::tensor_map_t({{"SOME_OUTPUT", std::make_shared<ovms::TensorInfo>("OUTPUT", ovms::Precision::FP32, ovms::shape_t{1, 1, 1, 1}, ovms::Layout{"NHWC"})}});  // not used for KFS
 
     void SetUp() override {
         ieCore = std::make_unique<ov::Core>();
@@ -880,6 +885,7 @@ protected:
         });
 
         ON_CALL(*instance, getInputsInfo()).WillByDefault(ReturnRef(servableInputs));
+        ON_CALL(*instance, getOutputsInfo()).WillByDefault(ReturnRef(servableOutputs));
         ON_CALL(*instance, getBatchSize()).WillByDefault(Return(1));
         ON_CALL(*instance, getModelConfig()).WillByDefault(ReturnRef(modelConfig));
 
@@ -905,7 +911,7 @@ TEST_F(KFSPredictValidation, RequestWithScalar) {
         std::make_shared<ovms::TensorInfo>("Input_FP32_Scalar", ovms::Precision::FP32, ovms::shape_t{}, ovms::Layout{"..."})}});
     preparePredictRequest(request,
         {{"Input_FP32_Scalar",
-            std::tuple<ovms::signed_shape_t, ovms::Precision>{{}, ovms::Precision::FP32}}});
+            std::tuple<ovms::signed_shape_t, ovms::Precision>{std::vector<int64_t>{}, ovms::Precision::FP32}}});
     auto status = instance->mockValidate(&request);
     EXPECT_TRUE(status.ok());
 }
@@ -1118,7 +1124,7 @@ TEST_F(KFSPredictValidation, RequestWithScalarBatchSizeAuto) {
 
     // First is incorrect, second is correct, but endpoint is abnormal anyway (scalar with batch size auto)
     preparePredictRequest(request, {{"im_data", {{3, 3, 800, 1344}, ovms::Precision::FP32}},
-                                       {"im_info", {{}, ovms::Precision::FP32}}});
+                                       {"im_info", {std::vector<int64_t>{}, ovms::Precision::FP32}}});
 
     servableInputs.clear();
     servableInputs = ovms::tensor_map_t{
@@ -1131,7 +1137,7 @@ TEST_F(KFSPredictValidation, RequestWithScalarBatchSizeAuto) {
 
     // First and second is correct, but endpoint is abnormal (scalar with batch size auto)
     preparePredictRequest(request, {{"im_data", {{1, 3, 800, 1344}, ovms::Precision::FP32}},
-                                       {"im_info", {{}, ovms::Precision::FP32}}});
+                                       {"im_info", {std::vector<int64_t>{}, ovms::Precision::FP32}}});
 
     status = instance->mockValidate(&request);
     EXPECT_EQ(status, ovms::StatusCode::INTERNAL_ERROR);
@@ -1221,7 +1227,7 @@ TEST_F(KFSPredictValidation, RequestWithScalarShapeAuto) {
 
     // First is incorrect, second is correct, expect reshape request due to shape=auto
     preparePredictRequest(request, {{"im_data", {{1, 3, 801, 1344}, ovms::Precision::FP32}},
-                                       {"im_info", {{}, ovms::Precision::FP32}}});
+                                       {"im_info", {std::vector<int64_t>{}, ovms::Precision::FP32}}});
 
     servableInputs.clear();
     servableInputs = ovms::tensor_map_t{
@@ -1234,7 +1240,7 @@ TEST_F(KFSPredictValidation, RequestWithScalarShapeAuto) {
 
     // First and second is correct, expect no further reshaping due to shape=auto
     preparePredictRequest(request, {{"im_data", {{1, 3, 800, 1344}, ovms::Precision::FP32}},
-                                       {"im_info", {{}, ovms::Precision::FP32}}});
+                                       {"im_info", {std::vector<int64_t>{}, ovms::Precision::FP32}}});
 
     status = instance->mockValidate(&request);
     EXPECT_EQ(status, ovms::StatusCode::OK) << status.string();
@@ -1328,7 +1334,7 @@ TEST_F(KFSPredictValidation, RequestIncorrectContentSizeForScalarEndpoint) {
         std::make_shared<ovms::TensorInfo>("Input_FP32_Scalar", ovms::Precision::FP32, ovms::shape_t{}, ovms::Layout{"..."})}});
     preparePredictRequest(request,
         {{"Input_FP32_Scalar",
-            std::tuple<ovms::signed_shape_t, ovms::Precision>{{}, ovms::Precision::FP32}}});
+            std::tuple<ovms::signed_shape_t, ovms::Precision>{std::vector<int64_t>{}, ovms::Precision::FP32}}});
 
     findKFSInferInputTensorContentInRawInputs(request, "Input_FP32_Scalar")->assign('c', sizeof(float) + 1);
 
@@ -1361,10 +1367,12 @@ protected:
     ::KFSRequest request;
     ovms::ModelConfig modelConfig{"model_name", "model_path"};
     ovms::tensor_map_t servableInputs;
+    ovms::tensor_map_t servableOutputs = ovms::tensor_map_t({{"SOME_OUTPUT", std::make_shared<ovms::TensorInfo>("OUTPUT", ovms::Precision::FP32, ovms::shape_t{1, 1, 1, 1}, ovms::Layout{"NHWC"})}});  // not used for KFS
 
     void SetUp() override {
         ieCore = std::make_unique<ov::Core>();
         instance = std::make_unique<NiceMock<MockedMetadataModelIns>>(*ieCore);
+        ON_CALL(*instance, getOutputsInfo()).WillByDefault(ReturnRef(servableOutputs));
     }
 };
 
@@ -1417,6 +1425,7 @@ protected:
     ::KFSRequest request;
     ovms::ModelConfig modelConfig{"model_name", "model_path"};
     ovms::tensor_map_t servableInputs;
+    ovms::tensor_map_t servableOutputs = ovms::tensor_map_t({{"SOME_OUTPUT", std::make_shared<ovms::TensorInfo>("OUTPUT", ovms::Precision::FP32, ovms::shape_t{1, 1, 1, 1}, ovms::Layout{"NHWC"})}});  // not used for KFS
 
     void SetUp() override {
         ieCore = std::make_unique<ov::Core>();
@@ -1434,6 +1443,7 @@ protected:
         });
 
         ON_CALL(*instance, getInputsInfo()).WillByDefault(ReturnRef(servableInputs));
+        ON_CALL(*instance, getOutputsInfo()).WillByDefault(ReturnRef(servableOutputs));
         ON_CALL(*instance, getBatchSize()).WillByDefault(Return(1));
         ON_CALL(*instance, getModelConfig()).WillByDefault(ReturnRef(modelConfig));
 
@@ -1794,6 +1804,7 @@ protected:
     ::KFSRequest request;
     const char* tensorName = DUMMY_MODEL_INPUT_NAME;
     ovms::tensor_map_t mockedInputsInfo;
+    ovms::tensor_map_t mockedOutputsInfo;
 };
 
 TEST_P(KFSPredictValidationPrecision, ValidPrecisions) {
@@ -1804,7 +1815,7 @@ TEST_P(KFSPredictValidationPrecision, ValidPrecisions) {
             {tensorName,
                 std::tuple<ovms::signed_shape_t, ovms::Precision>{{1, DUMMY_MODEL_INPUT_SIZE}, testedPrecision}},
         });
-    auto status = ovms::request_validation_utils::validate(request, mockedInputsInfo, "dummy", ovms::model_version_t{1});
+    auto status = ovms::request_validation_utils::validate(request, mockedInputsInfo, this->mockedOutputsInfo, "dummy", ovms::model_version_t{1});
     EXPECT_EQ(status, ovms::StatusCode::OK) << "Precision validation failed:"
                                             << toString(testedPrecision)
                                             << " should pass validation";
@@ -1878,6 +1889,7 @@ protected:
     TensorType request;
     const char* tensorName = DUMMY_MODEL_INPUT_NAME;
     ovms::tensor_map_t mockedInputsInfo;
+    ovms::tensor_map_t mockedOutputsInfo;
     void SetUp() override {
         auto shape2d = ovms::Shape{-1, -1};
         mockedInputsInfo[tensorName] = std::make_shared<ovms::TensorInfo>(tensorName, ovms::Precision::U8, shape2d, ovms::Layout{"NC"});
@@ -1891,13 +1903,13 @@ TYPED_TEST(PredictValidationString2DTest, positive) {
     // bs=1
     std::vector<std::string> inputStrings = {"String_123"};
     prepareInferStringRequest(this->request, this->tensorName, inputStrings);
-    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, "dummy", ovms::model_version_t{1});
+    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, this->mockedOutputsInfo, "dummy", ovms::model_version_t{1});
     EXPECT_EQ(status, ovms::StatusCode::OK);
     this->request.Clear();
     // bs=2
     inputStrings = {"String_123", "other"};
     prepareInferStringRequest(this->request, this->tensorName, inputStrings);
-    status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, "dummy", ovms::model_version_t{1});
+    status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, this->mockedOutputsInfo, "dummy", ovms::model_version_t{1});
     EXPECT_EQ(status, ovms::StatusCode::OK);
 }
 
@@ -1907,28 +1919,29 @@ TYPED_TEST(PredictValidationString2DTest, positive_data_in_buffer) {
     // bs=1
     std::vector<std::string> inputStrings = {"String_123"};
     prepareInferStringRequest(this->request, this->tensorName, inputStrings, false);
-    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, "dummy", ovms::model_version_t{1});
+    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, this->mockedOutputsInfo, "dummy", ovms::model_version_t{1});
     EXPECT_EQ(status, ovms::StatusCode::OK);
     this->request.Clear();
     // bs=2
     inputStrings = {"String_123", "other"};
     prepareInferStringRequest(this->request, this->tensorName, inputStrings, false);
-    status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, "dummy", ovms::model_version_t{1});
+    status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, this->mockedOutputsInfo, "dummy", ovms::model_version_t{1});
     EXPECT_EQ(status, ovms::StatusCode::OK);
 }
 
 TYPED_TEST(PredictValidationString2DTest, negative_no_string) {
     std::vector<std::string> inputStrings = {};
     prepareInferStringRequest(this->request, this->tensorName, inputStrings);
-    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, "dummy", ovms::model_version_t{1});
+    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, this->mockedOutputsInfo, "dummy", ovms::model_version_t{1});
     EXPECT_EQ(status, ovms::StatusCode::INVALID_BATCH_SIZE);
 }
 
+// To be removed once this test is moved to functional test suite
 TYPED_TEST(PredictValidationString2DTest, negative_over_1gb_after_expansion) {
     std::string longString(1024 * 1024 * 512 * 1, 'a');            // 512mb
     std::vector<std::string> inputStrings = {longString, "", ""};  // sum=1.5gb
     prepareInferStringRequest(this->request, this->tensorName, inputStrings);
-    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, "dummy", ovms::model_version_t{1});
+    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, this->mockedOutputsInfo, "dummy", ovms::model_version_t{1});
     EXPECT_EQ(status, ovms::StatusCode::INVALID_STRING_MAX_SIZE_EXCEEDED);
 }
 
@@ -1937,25 +1950,25 @@ TYPED_TEST(PredictValidationString2DTest, negative_no_string_in_buffer) {
         GTEST_SKIP() << "String inputs in buffer not supported for TFS api";
     std::vector<std::string> inputStrings = {};
     prepareInferStringRequest(this->request, this->tensorName, inputStrings, false);
-    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, "dummy", ovms::model_version_t{1});
+    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, this->mockedOutputsInfo, "dummy", ovms::model_version_t{1});
     EXPECT_EQ(status, ovms::StatusCode::INVALID_BATCH_SIZE);
 }
 
 TYPED_TEST(PredictValidationString2DTest, negative_shape_has_more_dimensions_than_1) {
     prepareInferStringInputWithTwoDimensionShapeTensor(this->request, this->tensorName);
-    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, "dummy", ovms::model_version_t{1});
+    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, this->mockedOutputsInfo, "dummy", ovms::model_version_t{1});
     EXPECT_EQ(status, ovms::StatusCode::INVALID_NO_OF_SHAPE_DIMENSIONS);
 }
 
 TYPED_TEST(PredictValidationString2DTest, negative_shape_has_negative_shape_value) {
     prepareInferStringInputWithNegativeShape(this->request, this->tensorName);
-    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, "dummy", ovms::model_version_t{1});
+    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, this->mockedOutputsInfo, "dummy", ovms::model_version_t{1});
     EXPECT_EQ(status, ovms::StatusCode::INVALID_SHAPE);
 }
 
 TYPED_TEST(PredictValidationString2DTest, zero_dim_request_to_dynamic_2d_u8_endpoint) {
     prepareInferStringInputWithZeroDimShape(this->request, this->tensorName);
-    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, "dummy", ovms::model_version_t{1});
+    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, this->mockedOutputsInfo, "dummy", ovms::model_version_t{1});
     EXPECT_EQ(status, ovms::StatusCode::INVALID_BATCH_SIZE) << status.string();
 }
 
@@ -1963,7 +1976,7 @@ TYPED_TEST(PredictValidationString2DTest, batchsize_change_required) {
     this->mockedInputsInfo[this->tensorName] = std::make_shared<ovms::TensorInfo>(this->tensorName, ovms::Precision::U8, ovms::Shape{3, -1}, ovms::Layout{"NC"});
     std::vector<std::string> inputStrings = {"String_123"};
     prepareInferStringRequest(this->request, this->tensorName, inputStrings);
-    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, "dummy", ovms::model_version_t{1}, {}, ovms::Mode::AUTO);
+    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, this->mockedOutputsInfo, "dummy", ovms::model_version_t{1}, {}, ovms::Mode::AUTO);
     EXPECT_EQ(status, ovms::StatusCode::BATCHSIZE_CHANGE_REQUIRED);
 }
 
@@ -1974,7 +1987,7 @@ TYPED_TEST(PredictValidationString2DTest, shape_change_required) {
     ovms::ShapeInfo inputShape{ovms::AUTO, {-1, 4}};
     ovms::shapes_info_map_t shapeMap;
     shapeMap[this->tensorName] = inputShape;
-    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, "dummy", ovms::model_version_t{1}, {}, ovms::Mode::FIXED, shapeMap);
+    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, this->mockedOutputsInfo, "dummy", ovms::model_version_t{1}, {}, ovms::Mode::FIXED, shapeMap);
     EXPECT_EQ(status, ovms::StatusCode::RESHAPE_REQUIRED);
 }
 
@@ -1982,7 +1995,7 @@ TYPED_TEST(PredictValidationString2DTest, string_not_allowed_with_demultiplexer)
     this->mockedInputsInfo[this->tensorName] = this->mockedInputsInfo[this->tensorName]->createCopyWithDemultiplexerDimensionPrefix(ovms::Dimension::any());
     std::vector<std::string> inputStrings = {"String_123"};
     prepareInferStringRequest(this->request, this->tensorName, inputStrings);
-    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, "dummy", ovms::model_version_t{1});
+    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, this->mockedOutputsInfo, "dummy", ovms::model_version_t{1});
     EXPECT_EQ(status, ovms::StatusCode::NOT_IMPLEMENTED);
 }
 
@@ -1992,6 +2005,7 @@ protected:
     TensorType request;
     const char* tensorName = DUMMY_MODEL_INPUT_NAME;
     ovms::tensor_map_t mockedInputsInfo;
+    ovms::tensor_map_t mockedOutputsInfo;
     void SetUp() override {
         auto shape1d = ovms::Shape{-1};
         mockedInputsInfo[tensorName] = std::make_shared<ovms::TensorInfo>(tensorName, ovms::Precision::U8, shape1d, ovms::Layout{"NC"});
@@ -2005,47 +2019,134 @@ TYPED_TEST(PredictValidationString1DTest, positive) {
     // bs=1
     std::vector<std::string> inputStrings = {"String_123"};
     prepareInferStringRequest(this->request, this->tensorName, inputStrings);
-    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, "dummy", ovms::model_version_t{1});
-    EXPECT_EQ(status, ovms::StatusCode::OK);
+    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, this->mockedOutputsInfo, "dummy", ovms::model_version_t{1});
+    EXPECT_EQ(status, ovms::StatusCode::NOT_IMPLEMENTED);
     // bs=2
+    this->request.Clear();
     inputStrings = {"String_123", "other"};
     prepareInferStringRequest(this->request, this->tensorName, inputStrings);
-    status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, "dummy", ovms::model_version_t{1});
-    EXPECT_EQ(status, ovms::StatusCode::OK);
+    status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, this->mockedOutputsInfo, "dummy", ovms::model_version_t{1});
+    EXPECT_EQ(status, ovms::StatusCode::NOT_IMPLEMENTED);
 }
 
 TYPED_TEST(PredictValidationString1DTest, negative_wrong_request_shape) {
     prepareInferStringInputWithTwoDimensionShapeTensor(this->request, this->tensorName);
-    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, "dummy", ovms::model_version_t{1});
-    EXPECT_EQ(status, ovms::StatusCode::INVALID_NO_OF_SHAPE_DIMENSIONS);
+    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, this->mockedOutputsInfo, "dummy", ovms::model_version_t{1});
+    EXPECT_EQ(status, ovms::StatusCode::NOT_IMPLEMENTED);
 }
 
+// To be removed once this test is moved to functional test suite
 TYPED_TEST(PredictValidationString1DTest, positive_over_1gb) {
     std::string longString(1024 * 1024 * 512 * 1, 'a');            // 512mb
     std::vector<std::string> inputStrings = {longString, "", ""};  // sum=1.5gb
     prepareInferStringRequest(this->request, this->tensorName, inputStrings);
-    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, "dummy", ovms::model_version_t{1});
-    EXPECT_EQ(status, ovms::StatusCode::OK);
+    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, this->mockedOutputsInfo, "dummy", ovms::model_version_t{1});
+    EXPECT_EQ(status, ovms::StatusCode::NOT_IMPLEMENTED);
 }
 
 TYPED_TEST(PredictValidationString1DTest, negative_negative_shape) {
     prepareInferStringInputWithNegativeShape(this->request, this->tensorName);
-    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, "dummy", ovms::model_version_t{1});
+    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, this->mockedOutputsInfo, "dummy", ovms::model_version_t{1});
     EXPECT_EQ(status, ovms::StatusCode::INVALID_SHAPE);
 }
 
 TYPED_TEST(PredictValidationString1DTest, zero_dim_request_to_dynamic_1d_u8_endpoint) {
     prepareInferStringInputWithZeroDimShape(this->request, this->tensorName);
-    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, "dummy", ovms::model_version_t{1});
-    EXPECT_EQ(status, ovms::StatusCode::OK) << status.string();  // Validated at deserialization stage
+    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, this->mockedOutputsInfo, "dummy", ovms::model_version_t{1});
+    EXPECT_EQ(status, ovms::StatusCode::NOT_IMPLEMENTED) << status.string();  // Validated at deserialization stage
 }
 
 TYPED_TEST(PredictValidationString1DTest, string_not_allowed_with_demultiplexer) {
     this->mockedInputsInfo[this->tensorName] = this->mockedInputsInfo[this->tensorName]->createCopyWithDemultiplexerDimensionPrefix(ovms::Dimension::any());
     std::vector<std::string> inputStrings = {"String_123"};
     prepareInferStringRequest(this->request, this->tensorName, inputStrings);
-    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, "dummy", ovms::model_version_t{1});
+    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, this->mockedOutputsInfo, "dummy", ovms::model_version_t{1});
     EXPECT_EQ(status, ovms::StatusCode::NOT_IMPLEMENTED);
+}
+
+template <typename TensorType>
+class PredictValidationStringNativeTest : public ::testing::Test {
+protected:
+    TensorType request;
+    const char* tensorName = DUMMY_MODEL_INPUT_NAME;
+    ovms::tensor_map_t mockedInputsInfo;
+    ovms::tensor_map_t mockedOutputsInfo;
+    void SetUp() override {
+        auto shape1d = ovms::Shape{-1};
+        mockedInputsInfo[tensorName] = std::make_shared<ovms::TensorInfo>(tensorName, ovms::Precision::STRING, shape1d, ovms::Layout{"N..."});
+    }
+};
+
+TYPED_TEST_SUITE(PredictValidationStringNativeTest, MyTypes);
+
+TYPED_TEST(PredictValidationStringNativeTest, positive) {
+    // bs=1
+    std::vector<std::string> inputStrings = {"String_123"};
+    prepareInferStringRequest(this->request, this->tensorName, inputStrings);
+    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, this->mockedOutputsInfo, "dummy", ovms::model_version_t{1});
+    EXPECT_EQ(status, ovms::StatusCode::OK);
+    // bs=2
+    this->request.Clear();
+    inputStrings = {"String_123", "other"};
+    prepareInferStringRequest(this->request, this->tensorName, inputStrings);
+    status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, this->mockedOutputsInfo, "dummy", ovms::model_version_t{1});
+    EXPECT_EQ(status, ovms::StatusCode::OK);
+}
+
+TYPED_TEST(PredictValidationStringNativeTest, negative_wrong_request_shape) {
+    prepareInferStringInputWithTwoDimensionShapeTensor(this->request, this->tensorName);
+    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, this->mockedOutputsInfo, "dummy", ovms::model_version_t{1});
+    EXPECT_EQ(status, ovms::StatusCode::INVALID_NO_OF_SHAPE_DIMENSIONS);
+}
+
+// To be removed once this test is moved to functional test suite
+TYPED_TEST(PredictValidationStringNativeTest, positive_over_1gb) {
+    std::string longString(1024 * 1024 * 512 * 1, 'a');                            // 512mb
+    std::vector<std::string> inputStrings = {longString, longString, longString};  // sum=1.5gb
+    prepareInferStringRequest(this->request, this->tensorName, inputStrings);
+    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, this->mockedOutputsInfo, "dummy", ovms::model_version_t{1});
+    EXPECT_EQ(status, ovms::StatusCode::OK);
+}
+
+TYPED_TEST(PredictValidationStringNativeTest, negative_negative_shape) {
+    prepareInferStringInputWithNegativeShape(this->request, this->tensorName);
+    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, this->mockedOutputsInfo, "dummy", ovms::model_version_t{1});
+    EXPECT_EQ(status, ovms::StatusCode::INVALID_SHAPE);
+}
+
+TYPED_TEST(PredictValidationStringNativeTest, zero_dim_request) {
+    prepareInferStringInputWithZeroDimShape(this->request, this->tensorName);
+    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, this->mockedOutputsInfo, "dummy", ovms::model_version_t{1});
+    EXPECT_EQ(status, ovms::StatusCode::OK) << status.string();
+}
+
+TYPED_TEST(PredictValidationStringNativeTest, string_not_allowed_with_demultiplexer) {
+    this->mockedInputsInfo[this->tensorName] = this->mockedInputsInfo[this->tensorName]->createCopyWithDemultiplexerDimensionPrefix(ovms::Dimension::any());
+    std::vector<std::string> inputStrings = {"String_123"};
+    prepareInferStringRequest(this->request, this->tensorName, inputStrings);
+    auto status = ovms::request_validation_utils::validate(this->request, this->mockedInputsInfo, this->mockedOutputsInfo, "dummy", ovms::model_version_t{1});
+    EXPECT_EQ(status, ovms::StatusCode::INVALID_NO_OF_SHAPE_DIMENSIONS);
+}
+
+#define VERIFY_COMPUTE_BUFFER_SIZE(SHAPE, ELEMENT_SIZE, WILL_NOT_OVERFLOW, EXPECTED_BYTES)                                                       \
+    {                                                                                                                                            \
+        size_t elementSize = ELEMENT_SIZE;                                                                                                       \
+        std::vector<int> rawShape SHAPE;                                                                                                         \
+        size_t expectedBytes = 12412412;                                                                                                         \
+        bool result = ovms::request_validation_utils::computeExpectedBufferSizeReturnFalseIfOverflow<int>(rawShape, elementSize, expectedBytes); \
+        EXPECT_EQ(WILL_NOT_OVERFLOW, result);                                                                                                    \
+        if (WILL_NOT_OVERFLOW) {                                                                                                                 \
+            EXPECT_EQ(EXPECTED_BYTES, expectedBytes);                                                                                            \
+        }                                                                                                                                        \
+    }
+
+TEST(PredictRequestUtilsTest, ComputeExpectedBufferSize) {
+    VERIFY_COMPUTE_BUFFER_SIZE(({1, 3, 4}), 1, true, 12);
+    VERIFY_COMPUTE_BUFFER_SIZE(({1, 3, 4, 0}), 1, true, 0);
+    VERIFY_COMPUTE_BUFFER_SIZE(({1, 3, 4, 1}), 0, true, 0);
+    SPDLOG_INFO("int numeric limit:{}", std::numeric_limits<int>::max());
+    SPDLOG_INFO("size_t numeric limit:{}", std::numeric_limits<size_t>::max());
+    VERIFY_COMPUTE_BUFFER_SIZE(({1, 9, std::numeric_limits<int>::max(), std::numeric_limits<size_t>::max() / std::numeric_limits<int>::max() / 8}), 1, false, 0);
 }
 
 #pragma GCC diagnostic pop

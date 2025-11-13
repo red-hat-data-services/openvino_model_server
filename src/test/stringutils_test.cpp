@@ -152,6 +152,53 @@ TEST(StringUtils, startsWith) {
     EXPECT_EQ(startsWith("TENSO", "TENSOR"), false);
 }
 
+TEST(StringUtils, stof) {
+    auto result = ovms::stof("  -100 ");
+    EXPECT_FALSE(result);
+
+    result = ovms::stof("  -100.0 ");
+    EXPECT_FALSE(result);
+
+    result = ovms::stof("-100");
+    EXPECT_TRUE(result);
+    EXPECT_NEAR(result.value(), -100.0f, 0.0001f);
+
+    result = ovms::stof("-100.0");
+    EXPECT_TRUE(result);
+    EXPECT_NEAR(result.value(), -100.0f, 0.0001f);
+
+    result = ovms::stof("100.0");
+    EXPECT_TRUE(result);
+    EXPECT_NEAR(result.value(), 100.0f, 0.0001f);
+
+    result = ovms::stof("100.0000000000001");
+    EXPECT_TRUE(result);
+    EXPECT_NEAR(result.value(), 100.0f, 0.0001f);
+
+    result = ovms::stof("0.01");
+    EXPECT_TRUE(result);
+    EXPECT_NEAR(result.value(), 0.01f, 0.0001f);
+
+    result = ovms::stof("0.0000000000001");
+    EXPECT_TRUE(result);
+    EXPECT_NEAR(result.value(), 0.0f, 0.0001f);
+
+    // with e
+    result = ovms::stof("1e-10");
+    EXPECT_TRUE(result);
+    EXPECT_NEAR(result.value(), 1e-10f, 0.0001f);
+
+    // inf / nan
+    result = ovms::stof("inf");
+    EXPECT_FALSE(result) << result.value();
+    result = ovms::stof("nan");
+    EXPECT_FALSE(result) << result.value();
+    result = ovms::stof("1.0e+100");
+    EXPECT_FALSE(result) << result.value();
+    result = ovms::stof("1.0e-100");
+    EXPECT_FALSE(result);
+}
+
 TEST(StringUtils, stou32) {
     auto result = ovms::stou32("-100");
     EXPECT_FALSE(result);
@@ -162,6 +209,21 @@ TEST(StringUtils, stou32) {
     result = ovms::stou32("4294967295");
     EXPECT_TRUE(result);
     EXPECT_EQ(result.value(), 4294967295);
+}
+
+TEST(StringUtils, stou64) {
+    auto result = ovms::stou64("-100");
+    EXPECT_FALSE(result);
+
+    result = ovms::stou64("   100 ");
+    EXPECT_FALSE(result);
+
+    result = ovms::stou64("18446744073709551616");
+    EXPECT_FALSE(result);
+
+    result = ovms::stou64("18446744073709551615");
+    EXPECT_TRUE(result);
+    EXPECT_EQ(result.value(), 18446744073709551615ULL);
 }
 
 TEST(StringUtils, stoi32) {
@@ -221,5 +283,55 @@ TEST(StringUtils, stoi64) {
     EXPECT_FALSE(result);
 
     result = ovms::stoi64("");
+    EXPECT_FALSE(result);
+}
+
+TEST(StringUtils, isValidUtf8) {
+    auto result = ovms::isValidUtf8("\x7a");  // one ASCII char
+    EXPECT_TRUE(result);
+
+    result = ovms::isValidUtf8("\x1a\x2b\x3c");  // three ASCII chars
+    EXPECT_TRUE(result);
+
+    result = ovms::isValidUtf8("\x2b\x3c\x1a\x2b\x3c");  // six ASCII chars
+    EXPECT_TRUE(result);
+
+    result = ovms::isValidUtf8("\x1a\xca\xaa");  // one ASCII char and one UTF-8 char
+    EXPECT_TRUE(result);
+
+    result = ovms::isValidUtf8("\xea\xaa\xaa");  // one 3byte long UTF-8 char
+    EXPECT_TRUE(result);
+
+    result = ovms::isValidUtf8("\xf5\xab\xab\xac");  // one 4byte long UTF-8 char
+    EXPECT_TRUE(result);
+
+    result = ovms::isValidUtf8("\xf5\xab\xab");  // incomplete 4byte long UTF-8 char
+    EXPECT_FALSE(result);
+
+    result = ovms::isValidUtf8("\xea\xaa");  // incomplete 3byte long UTF-8 char
+    EXPECT_FALSE(result);
+
+    result = ovms::isValidUtf8("\xf5\xc0");  // incorrect char
+    EXPECT_FALSE(result);
+
+    result = ovms::isValidUtf8("\x1a\xca");  // ASCII char followed by incomplete UTF-8 char
+    EXPECT_FALSE(result);
+
+    result = ovms::isValidUtf8("");  // Empty content considered invalid because there is nothing to return as partial response
+    EXPECT_FALSE(result);
+
+    result = ovms::isValidUtf8("\x7a\xaa\xaa");  // incorrect sequence without length information
+    EXPECT_FALSE(result);
+
+    result = ovms::isValidUtf8("\xc3\xa9");
+    EXPECT_TRUE(result);
+
+    result = ovms::isValidUtf8("\xe2\x82\xac");
+    EXPECT_TRUE(result);
+
+    result = ovms::isValidUtf8("\xf0\x9d\x84\x9e");
+    EXPECT_TRUE(result);
+
+    result = ovms::isValidUtf8("\xaa\xaa");  // iterations would decrease i below 0
     EXPECT_FALSE(result);
 }

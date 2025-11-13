@@ -17,19 +17,25 @@
 #include <functional>
 #include <limits>
 #include <numeric>
+#include <optional>
+#include <regex>
 #include <string>
 #include <utility>
 
+#pragma warning(push)
+#pragma warning(disable : 4624)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wall"
 #pragma GCC diagnostic ignored "-Wunused-but-set-variable"
 #include "tensorflow/core/framework/tensor.h"
 #include "tensorflow_serving/apis/prediction_service.grpc.pb.h"
 #pragma GCC diagnostic pop
+#pragma warning(pop)
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include "../cleaner_utils.hpp"
 #include "../dags/custom_node.hpp"
 #include "../dags/custom_node_library_manager.hpp"
 #include "../dags/dl_node.hpp"
@@ -64,7 +70,7 @@ protected:
         CustomNodeLibraryManager manager;
         ASSERT_EQ(manager.loadLibrary(
                       this->libraryName,
-                      this->libraryPath),
+                      getGenericFullPathForBazelOut(this->libraryPath)),
             StatusCode::OK);
         ASSERT_EQ(manager.getLibrary(
                       this->libraryName,
@@ -273,7 +279,7 @@ protected:
         ASSERT_EQ(modelManager.reloadModelWithVersions(config), StatusCode::OK_RELOADED);
         ASSERT_EQ(manager.loadLibrary(
                       differentOpsLibraryName,
-                      differentOpsLibraryPath),
+                      getGenericFullPathForBazelOut(differentOpsLibraryPath)),
             StatusCode::OK);
         ASSERT_EQ(manager.getLibrary(
                       differentOpsLibraryName,
@@ -281,7 +287,7 @@ protected:
             StatusCode::OK);
         ASSERT_EQ(manager.loadLibrary(
                       chooseMaxLibraryName,
-                      chooseMaxLibraryPath),
+                      getGenericFullPathForBazelOut(chooseMaxLibraryPath)),
             StatusCode::OK);
         ASSERT_EQ(manager.getLibrary(
                       chooseMaxLibraryName,
@@ -302,8 +308,8 @@ TEST_F(EnsembleFlowCustomNodeAndDemultiplexerGatherPipelineExecutionTest, Multip
     // Most basic configuration, just process single add-sub custom node pipeline request
     // input  (differentOps    dummy   chooseMax ) XN    output
     //  O-----(----->O---------->O------->O------>...----->O
-    const uint demultiplicationLayersCount = 10;
-    // values choosen in a way that first choosen different ops result will be addition. all following ones will be multiplications
+    const uint32_t demultiplicationLayersCount = 10;
+    // values chosen in a way that first chosen different ops result will be addition. all following ones will be multiplications
     const std::vector<float> inputValues{0.2, 0.7, -0.4, -0.1, 0.0001, -0.8, 0.7, 0.8, 0.9, 0.1};
     const std::vector<float> inputFactors{1, -1, 2, 2};
     parameters_t parameters{
@@ -317,7 +323,7 @@ TEST_F(EnsembleFlowCustomNodeAndDemultiplexerGatherPipelineExecutionTest, Multip
                 if (iterations == 0) {
                     f += inputFactors[0];
                 } else {
-                    f *= inputFactors[2];  // different ops mutliply will be choosen
+                    f *= inputFactors[2];  // different ops multiply will be chosen
                 }
                 f += 1;  // dummy
             }
@@ -374,8 +380,8 @@ TEST_F(EnsembleFlowCustomNodeAndDemultiplexerGatherPipelineExecutionTest, Multip
     // Most basic configuration, just process single add-sub custom node pipeline request
     // input  (differentOps dummy)xN   chooseMax xN    output
     //  O-----(----->O------->O---...----->O---->...----->O
-    const uint demultiplicationLayersCount = 4;
-    // values choosen in a way that first choosen different ops result will be addition. all following ones will be multiplications
+    const uint32_t demultiplicationLayersCount = 4;
+    // values chosen in a way that first chosen different ops result will be addition. all following ones will be multiplications
     const std::vector<float> inputValues{0.2, 0.7, -0.4, -0.1, 0.0001, -0.8, 0.7, 0.8, 0.9, 0.1};
     const std::vector<float> inputFactors{1, -1, 2, 2};
     parameters_t parameters{
@@ -389,7 +395,7 @@ TEST_F(EnsembleFlowCustomNodeAndDemultiplexerGatherPipelineExecutionTest, Multip
                 if (iterations == 0) {
                     f += inputFactors[0];
                 } else {
-                    f *= inputFactors[2];  // different ops mutliply will be choosen
+                    f *= inputFactors[2];  // different ops multiply will be chosen
                 }
                 f += 1;  // dummy
             }
@@ -504,7 +510,7 @@ TEST_F(EnsembleFlowCustomNodePipelineExecutionTest, SeriesOfCustomNodes) {
     ASSERT_EQ(pipeline.execute(DEFAULT_TEST_CONTEXT), StatusCode::OK);
     ASSERT_EQ(response.outputs().size(), 1);
 
-    this->checkResponse<float>(inputValues, [N, addValues, subValues](float value) -> float {
+    this->checkResponse<float>(inputValues, [N, addValues, subValues, PARAMETERS_PAIRS_COUNT](float value) -> float {
         for (int i = 0; i < PARAMETERS_PAIRS_COUNT; i++) {
             value += (N / PARAMETERS_PAIRS_COUNT) * addValues[i];
             value -= (N / PARAMETERS_PAIRS_COUNT) * subValues[i];
@@ -571,7 +577,7 @@ TEST_F(EnsembleFlowCustomNodePipelineExecutionTest, ParallelCustomNodes) {
         this->checkResponse<float>(
             pipelineOutputName + std::to_string(i),
             inputValues,
-            [i, addValues, subValues](float value) -> float {
+            [i, addValues, subValues, PARAMETERS_PAIRS_COUNT](float value) -> float {
                 value += addValues[i % PARAMETERS_PAIRS_COUNT];
                 value -= subValues[i % PARAMETERS_PAIRS_COUNT];
                 return value;
@@ -1147,7 +1153,7 @@ TEST_F(EnsembleFlowCustomNodePipelineExecutionTest, FailInCustomNodeDeinitialize
         {"custom_node", {{customNodeOutputName, pipelineOutputName}}}};
 
     std::unique_ptr<Pipeline> pipeline;
-    // creating definition, pipeline and then executing works propely due to correct initialization
+    // creating definition, pipeline and then executing works properly due to correct initialization
     ASSERT_EQ(factory.createDefinition("my_new_pipeline", info, connections, manager), StatusCode::OK);
     ASSERT_EQ(factory.create(pipeline, "my_new_pipeline", &request, &response, manager), StatusCode::OK);
     ASSERT_EQ(pipeline->execute(DEFAULT_TEST_CONTEXT), StatusCode::OK);
@@ -1490,7 +1496,7 @@ protected:
     }
 
     void loadConfiguration(const char* configContent, Status expectedStatus = StatusCode::OK) {
-        createConfigFileWithContent(configContent, configJsonFilePath);
+        createConfigFileWithContent(adjustConfigForTargetPlatformCStr(configContent), configJsonFilePath);
         ASSERT_EQ(manager.loadConfig(configJsonFilePath), expectedStatus);
     }
 
@@ -2395,8 +2401,8 @@ TEST_F(EnsembleFlowCustomNodeAndDemultiplexerLoadConfigThenExecuteTest, Demultip
     std::vector<float> input(4 * DUMMY_MODEL_OUTPUT_SIZE);
     std::fill(input.begin(), input.end(), 1.0);
 
-    uint iterations = -1;
-    uint number = 0;
+    uint32_t iterations = -1;
+    uint32_t number = 0;
     std::transform(input.begin(), input.end(), input.begin(),
         [&iterations, &number](float f) -> float {
             iterations++;
@@ -2443,13 +2449,13 @@ struct LibraryParamControlledMetadata {
         const char* end = str;
         for (; *end != '\0'; ++end) {
             if ((end - str) > MAX) {
-                EXPECT_TRUE(false);
+                EXPECT_TRUE(false) << *end;
             }
         }
         const char* end2 = prefix;
         for (; *end2 != '\0'; ++end2) {
-            if ((end2 - str) > MAX) {
-                EXPECT_TRUE(false);
+            if ((end2 - prefix) > MAX) {
+                EXPECT_TRUE(false) << *end2;
             }
         }
         size_t strLen = std::strlen(str);
@@ -5637,7 +5643,7 @@ TEST_F(EnsembleFlowCustomNodePipelineExecutionTest, MultipleDeinitializeCallsOnR
     //  O--------->O--------->O--------->O---------->O
     //          add-sub    add-sub    add-sub
     ResourcesAccessModelManager manager;
-    manager.startCleaner();
+    ovms::FunctorResourcesCleaner cleaner(manager);
     ASSERT_EQ(manager.getResourcesSize(), 0);
     PipelineFactory factory;
 
@@ -5680,11 +5686,11 @@ TEST_F(EnsembleFlowCustomNodePipelineExecutionTest, MultipleDeinitializeCallsOnR
         {"custom_node_3", {{customNodeOutputName, pipelineOutputName}}}};
 
     ASSERT_EQ(factory.createDefinition("my_new_pipeline", info, connections, manager), StatusCode::OK);
-    waitForOVMSResourcesCleanup(manager);
+    cleaner.cleanup();
     ASSERT_EQ(manager.getResourcesSize(), 3);
 
     factory.retireOtherThan({}, manager);
-    waitForOVMSResourcesCleanup(manager);
+    cleaner.cleanup();
     ASSERT_EQ(manager.getResourcesSize(), 0);
     manager.join();
     // Each custom node has effectively 1 internalManager initialized, because they use same library instance
@@ -5698,7 +5704,8 @@ TEST_F(EnsembleFlowCustomNodePipelineExecutionTest, ReloadPipelineWithoutNodeDei
     //  O--------->O--------->O--------->O---------->O
     //          add-sub    add-sub    add-sub
     ResourcesAccessModelManager manager;
-    manager.startCleaner();
+    ovms::FunctorResourcesCleaner cleaner(manager);
+    cleaner.cleanup();
     ASSERT_EQ(manager.getResourcesSize(), 0);
     PipelineFactory factory;
 
@@ -5741,7 +5748,7 @@ TEST_F(EnsembleFlowCustomNodePipelineExecutionTest, ReloadPipelineWithoutNodeDei
         {"custom_node_3", {{customNodeOutputName, pipelineOutputName}}}};
 
     ASSERT_EQ(factory.createDefinition("my_new_pipeline", info, connections, manager), StatusCode::OK);
-    waitForOVMSResourcesCleanup(manager);
+    cleaner.cleanup();
     ASSERT_EQ(manager.getResourcesSize(), 3);
 
     // Nodes
@@ -5753,9 +5760,8 @@ TEST_F(EnsembleFlowCustomNodePipelineExecutionTest, ReloadPipelineWithoutNodeDei
     connections[EXIT_NODE_NAME] = {
         {"custom_node_2", {{customNodeOutputName, pipelineOutputName}}}};
     ASSERT_EQ(factory.reloadDefinition("my_new_pipeline", std::move(info), std::move(connections), manager), StatusCode::OK);
-    waitForOVMSResourcesCleanup(manager);
+    cleaner.cleanup();
     ASSERT_EQ(manager.getResourcesSize(), 2);
-    manager.join();
     // Each custom node has effectively 1 internalManager initialized, because they use same library instance
     // in order to count whether deinitialize has been called expected number of times
     ASSERT_EQ(LibraryCountDeinitialize::deinitializeCounter, 3);
@@ -5869,7 +5875,8 @@ template <typename Pair,
     typename ResponseType = typename Pair::second_type>
 class EnsembleFlowStringInput : public ::testing::Test {
 public:
-    void SetUp() override {}
+    void SetUp() override {
+    }
 
     RequestType request;
     ResponseType response;
@@ -5925,6 +5932,7 @@ TYPED_TEST(EnsembleFlowStringInput, positive_2d) {
     checkIncrement4DimResponse<uint8_t>(this->pipelineOutputName, expectedData, this->response, expectedShape, checkRaw);
 }
 
+// Legacy, supported via Native OV String since 2024.0
 TYPED_TEST(EnsembleFlowStringInput, positive_1d) {
     // Most basic configuration, just process single passthrough custom node pipeline request
     // input  passthrough  output
@@ -5955,18 +5963,5 @@ TYPED_TEST(EnsembleFlowStringInput, positive_1d) {
     pipeline.push(std::move(custom_node));
     pipeline.push(std::move(output_node));
 
-    ASSERT_EQ(pipeline.execute(DEFAULT_TEST_CONTEXT), StatusCode::OK);
-    std::vector<uint8_t> expectedData = {
-        4, 0, 0, 0,  // batch size
-        0, 0, 0, 0,  // first string start offset
-        3, 0, 0, 0,  // end of "ala" in condensed content
-        3, 0, 0, 0,  // end of "" in condensed content
-        5, 0, 0, 0,  // end of "ma" in condensed content
-        9, 0, 0, 0,  // end of "kota" in condensed content
-        'a', 'l', 'a',
-        'm', 'a',
-        'k', 'o', 't', 'a'};
-    std::vector<size_t> expectedShape = {33};
-    bool checkRaw = false;
-    checkIncrement4DimResponse<uint8_t>(this->pipelineOutputName, expectedData, this->response, expectedShape, checkRaw);
+    ASSERT_EQ(pipeline.execute(DEFAULT_TEST_CONTEXT), StatusCode::NOT_IMPLEMENTED);
 }

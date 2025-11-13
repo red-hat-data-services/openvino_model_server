@@ -15,37 +15,53 @@
 //*****************************************************************************
 #pragma once
 
+#include <chrono>
 #include <condition_variable>
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <sstream>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include <openvino/openvino.hpp>
 
-#include "kfs_frontend/kfs_grpc_inference_service.hpp"
+#include "logging.hpp"
 #include "model_metric_reporter.hpp"
 #include "modelchangesubscription.hpp"
 #include "modelconfig.hpp"
-#include "modelinstanceunloadguard.hpp"
 #include "modelversionstatus.hpp"
+#include "ovms.h"  // NOLINT
 #include "ovinferrequestsqueue.hpp"
+#include "status.hpp"
+#include "servable.hpp"
 #include "tensorinfo.hpp"
-#include "tfs_frontend/tfs_utils.hpp"
+
+// TODO windows
+#ifdef __linux__
+#include <openvino/runtime/intel_gpu/ocl/ocl.hpp>
+#include <openvino/runtime/intel_gpu/ocl/va.hpp>
+#endif
+#include "openvino/runtime/remote_tensor.hpp"
 
 namespace ovms {
+
 class MetricRegistry;
 class ModelInstanceUnloadGuard;
 class InferenceRequest;
 class InferenceResponse;
-class PipelineDefinition;
+class IOVTensorFactory;
+struct NotifyReceiver;
+class SequenceManager;
 class Status;
 template <typename T1, typename T2>
 struct RequestProcessor;
+
+extern void* globalVaDisplay;
 
 class DynamicModelParameter {
 public:
@@ -73,7 +89,7 @@ private:
 /**
      * @brief This class contains all the information about model
      */
-class ModelInstance {
+class ModelInstance : public Servable {
 protected:
     /**
          * @brief Performs model loading
@@ -97,6 +113,26 @@ protected:
          */
     std::shared_ptr<ov::CompiledModel> compiledModel;
 
+public:
+    // TODO windows
+#ifdef __linux__
+    cl_context oclContextC{nullptr};
+
+public:
+    // TODO const correctness & ownership & thread safety
+    const cl_context* getOclCContext() const { return &oclContextC; }
+#endif
+
+public:
+    virtual const std::shared_ptr<SequenceManager>& getSequenceManager() const { return this->sequenceManager; }
+
+protected:
+    std::shared_ptr<SequenceManager> sequenceManager;
+#ifdef __linux__
+    std::unique_ptr<ov::intel_gpu::ocl::ClContext> oclContextCpp;
+    std::unique_ptr<ov::intel_gpu::ocl::VAContext> vaContext;
+#endif
+    std::unordered_map<int, std::shared_ptr<IOVTensorFactory>> tensorFactories;
     /**
          * @brief Model name
          */
@@ -205,6 +241,7 @@ protected:
          * @return Status
          */
     virtual Status loadOVCompiledModel(const ModelConfig& config);
+    void loadTensorFactories();
 
     /**
          * @brief Prepares inferenceRequestsQueue
@@ -234,9 +271,6 @@ protected:
          */
     Status loadOVModelUsingCustomLoader();
 
-    template <typename RequestType>
-    const Status validate(const RequestType* request);
-
 private:
     /**
          * @brief Holds model required file names. First is loaded
@@ -251,8 +285,10 @@ private:
     /**
          * @brief Holds the information about outputs and it's parameters
          */
+protected:
     tensor_map_t outputsInfo;
 
+private:
     /**
          * @brief OpenVINO inference execution stream pool
          */
@@ -278,14 +314,30 @@ private:
          * @param config
          */
     Status loadInputTensors(const ModelConfig& config, const DynamicModelParameter& parameter = DynamicModelParameter());
-
-    Status gatherReshapeInfo(bool isBatchingModeAuto, const DynamicModelParameter& parameter, bool& isReshapeRequired, std::map<std::string, ov::PartialShape>& modelShapes);
     /**
          * @brief Internal method for loading outputs
          *
          * @param config
          */
     Status loadOutputTensors(const ModelConfig& config);
+
+protected:
+    virtual Status loadOutputTensorsImpl(const ModelConfig& config);
+    virtual Status loadInputTensorsImpl(const ModelConfig& config, const DynamicModelParameter& parameter = DynamicModelParameter());
+
+private:
+    /**
+     * @brief Determines if during inference we are able to reset ov::InferRequest output tensor to original state, which is required for setting output functionality to be interoperable with both inferences with and without output set.
+     */
+    void checkForOutputTensorResetAbility();
+    Status adjustForEmptyOutputNames();
+    bool supportOutputTensorsReset = true;
+
+public:
+    bool doesSupportOutputReset() const;
+
+private:
+    Status gatherReshapeInfo(bool isBatchingModeAuto, const DynamicModelParameter& parameter, bool& isReshapeRequired, std::map<std::string, ov::PartialShape>& modelShapes);
 
     /**
       * @brief Flag determining if cache is disabled
@@ -356,13 +408,8 @@ public:
         --predictRequestsHandlesCount;
     }
 
-    /**
-         * @brief Gets the model name
-         * 
-         * @return model name
-         */
-    virtual const std::string& getName() const {
-        return name;
+    const std::string& getTargetDevice() const {  // TODO @atobisze
+        return targetDevice;
     }
 
     /**
@@ -382,14 +429,6 @@ public:
     const std::vector<std::string>& getModelFiles() const {
         return modelFiles;
     }
-    /**
-         * @brief Gets version
-         *
-         * @return version
-         */
-    virtual model_version_t getVersion() const {
-        return version;
-    }
 
     /**
          * @brief Gets model status
@@ -398,15 +437,6 @@ public:
          */
     const ModelVersionStatus& getStatus() const {
         return status;
-    }
-
-    /**
-         * @brief Gets executing target device name
-         *
-         * @return target device name
-         */
-    const std::string& getTargetDevice() {
-        return targetDevice;
     }
 
     /**
@@ -456,7 +486,19 @@ public:
         return inputsInfo;
     }
 
-    virtual ov::AnyMap getRTInfo() const;
+    /**
+           * @brief Get RTMap Info object
+           * @param path list of keys to get RTMap info
+           * @return const ov::AnyMap
+           */
+    ov::AnyMap getRTInfo(std::vector<std::string> path);
+
+    /**
+           * @brief Get RTMap Info object
+           *
+           * @return const ov::AnyMap
+         */
+    virtual ov::AnyMap getRTInfo();
 
     /**
          * @brief Get the Outputs Info object
@@ -558,43 +600,25 @@ public:
          *
          * @return Status
          */
-    Status waitForLoaded(const uint waitForModelLoadedTimeoutMilliseconds,
+    Status waitForLoaded(const uint32_t waitForModelLoadedTimeoutMilliseconds,
         std::unique_ptr<ModelInstanceUnloadGuard>& modelInstanceUnloadGuard);
 
-    void subscribe(PipelineDefinition& pd);
+    void subscribe(NotifyReceiver& pd);
 
-    void unsubscribe(PipelineDefinition& pd);
+    void unsubscribe(NotifyReceiver& pd);
 
     const ModelChangeSubscription& getSubscribtionManager() const { return subscriptionManager; }
 
     Status performInference(ov::InferRequest& inferRequest);
 
-    template <typename RequestType, typename ResponseType>
-    Status infer(const RequestType* requestProto,
-        ResponseType* responseProto,
-        std::unique_ptr<ModelInstanceUnloadGuard>& modelUnloadGuardPtr);
-
     ModelMetricReporter& getMetricReporter() const { return *this->reporter; }
 
     uint32_t getOptimalNumberOfInferRequests() const;
     uint32_t getNumOfStreams() const;
+    const std::unordered_map<int, std::shared_ptr<IOVTensorFactory>> getTensorFactories() { return this->tensorFactories; }
 
     template <class ArrayType>
     void fetchModelFiles(bool& found, ArrayType ext);
-    Status infer(float* data, float* output);
-    virtual std::unique_ptr<RequestProcessor<tensorflow::serving::PredictRequest, tensorflow::serving::PredictResponse>> createRequestProcessor(const tensorflow::serving::PredictRequest*, tensorflow::serving::PredictResponse*);
-    virtual std::unique_ptr<RequestProcessor<KFSRequest, KFSResponse>> createRequestProcessor(const KFSRequest*, KFSResponse*);
-    virtual std::unique_ptr<RequestProcessor<InferenceRequest, InferenceResponse>> createRequestProcessor(const InferenceRequest*, InferenceResponse*);
     virtual const std::set<std::string>& getOptionalInputNames();
-};
-template <typename RequestType, typename ResponseType>
-struct RequestProcessor {
-    RequestProcessor();
-    virtual ~RequestProcessor();
-    virtual Status extractRequestParameters(const RequestType* request);
-    virtual Status prepare();
-    virtual Status preInferenceProcessing(ov::InferRequest& inferRequest);
-    virtual Status postInferenceProcessing(ResponseType* response, ov::InferRequest& inferRequest);
-    virtual Status release();
 };
 }  // namespace ovms
