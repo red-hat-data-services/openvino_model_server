@@ -292,6 +292,7 @@ RUN bazel build --jobs=$JOBS ${debug_bazel_flags} //src:release_custom_nodes
 
 # OVMS
 ARG OPTIMIZE_BUILDING_TESTS=0
+RUN rm -f /usr/lib64/cmake/OpenSSL/OpenSSLConfig.cmake
 # Builds unit tests together with ovms server in one step
 # It speeds up CI when tests are executed outside of the image building
 # hadolint ignore=SC2046
@@ -367,7 +368,9 @@ ARG FUZZER_BUILD=0
 ARG debug_bazel_flags="--strip=always  --config=mp_on_py_on --//:distro=redhat"
 COPY --from=capi-build /ovms_release/lib/libovms_shared.so /ovms_release/lib/
 COPY create_package.sh /
-RUN ./create_package.sh
+RUN ./create_package.sh ; if ! [[ $debug_bazel_flags == *"_py_off"* ]]; then \
+   echo $'#!/bin/bash\npython3 -m openvino_tokenizers.cli "$@"' > /ovms_release/bin/convert_tokenizer ; \
+   chmod +x /ovms_release/bin/convert_tokenizer ; fi
 
 # hadolint ignore=DL3059
 RUN chown -R ovms:ovms /ovms_release
