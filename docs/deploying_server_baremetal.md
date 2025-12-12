@@ -35,9 +35,16 @@ export PATH=$PATH:${PWD}/ovms/bin
 In case of the version with python run also:
 ```{code} sh
 export PYTHONPATH=${PWD}/ovms/lib/python
-sudo apt -y install libpython3.10
+sudo apt -y install python3-pip
 pip3 install "Jinja2==3.1.6" "MarkupSafe==3.0.2"
 ```
+and if you plan to use Python nodes with OpenVINO or OpenVINO GenAI, you will also need to install NumPy:
+```{code} sh
+pip3 install numpy
+```
+**Do not install openvino, openvino-tokenizers or openvino-genai via pip**.
+Model server version with Python is shipped with those packages and new installation with pip will likely result in broken dependencies.
+
 :::
 :::{tab-item} Ubuntu 24.04
 :sync: ubuntu-24-04
@@ -63,9 +70,16 @@ export PATH=$PATH:${PWD}/ovms/bin
 In case of the version with python run also:
 ```{code} sh
 export PYTHONPATH=${PWD}/ovms/lib/python
-sudo apt -y install libpython3.12
+sudo apt -y install python3-pip
 pip3 install "Jinja2==3.1.6" "MarkupSafe==3.0.2"
 ```
+and if you plan to use Python nodes with OpenVINO or OpenVINO GenAI, you will also need to install NumPy:
+```{code} sh
+pip3 install numpy
+```
+**Do not install openvino, openvino-tokenizers or openvino-genai via pip**.
+Model server version with Python is shipped with those packages and new installation with pip will likely result in broken dependencies.
+
 :::
 :::{tab-item} RHEL 9.6
 :sync: rhel-9.6
@@ -91,9 +105,17 @@ export PATH=$PATH:${PWD}/ovms/bin
 In case of the version with python run also:
 ```{code} sh
 export PYTHONPATH=${PWD}/ovms/lib/python
-sudo yum install -y python39-libs
+sudo yum install -y python3-pip
 pip3 install "Jinja2==3.1.6" "MarkupSafe==3.0.2"
 ```
+
+and if you plan to use Python nodes with OpenVINO or OpenVINO GenAI, you will also need to install NumPy:
+```{code} sh
+pip3 install numpy
+```
+**Do not install openvino, openvino-tokenizers or openvino-genai via pip**.
+Model server version with Python is shipped with those packages and new installation with pip will likely result in broken dependencies.
+
 :::
 :::{tab-item} Windows
 :sync: windows
@@ -125,12 +147,21 @@ Run `setupvars` script to set required environment variables.
 .\ovms\setupvars.ps1
 ```
 
+Additionally you can install [ovms as a windows service](windows_service.md)
+
+**Windows install service**
+```bat
+.\ovms\install_ovms_service.bat
+```
+
 > **Note**: If package contains Python, running this script changes Python settings for the shell that runs it. Environment variables are set only for the current shell so make sure you rerun the script before using model server in a new shell. 
 
 You can also build model server from source by following the [developer guide](windows_developer_guide.md).
 
 :::
 ::::
+
+> **NOTE**: You can also access [public drops of the development version](https://storage.openvinotoolkit.org/repositories/openvino_model_server/packages/weekly/) of the model server, which are built from the main branch. These builds allow you to evaluate the latest features ahead of official releases.
 
 ## Test the Deployment
 
