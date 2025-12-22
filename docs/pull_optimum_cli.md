@@ -15,7 +15,7 @@ mkdir models
 ## Add optimum-cli to OVMS installation on windows
 
 ```bat
-curl -L https://github.com/openvinotoolkit/model_server/releases/download/v2025.3/ovms_windows_python_on.zip -o ovms.zip
+curl -L https://github.com/openvinotoolkit/model_server/releases/download/v2025.4/ovms_windows_python_on.zip -o ovms.zip
 tar -xf ovms.zip
 ovms\setupvars.bat
 ovms\python\python -m pip install -r https://raw.githubusercontent.com/openvinotoolkit/model_server/refs/heads/releases/2025/4/demos/common/export_models/requirements.txt
@@ -47,7 +47,7 @@ ovms --pull --source_model <model_name_in_HF> --model_repository_path <model_rep
 Example for pulling `Qwen/Qwen3-8B`:
 
 ```bat
-ovms --pull --source_model "Qwen/Qwen3-8B" --model_repository_path /models --model_name Qwen3-8B --target_device CPU --task text_generation --weight-format int8 
+ovms --pull --source_model "Qwen/Qwen3-8B" --model_repository_path models --model_name Qwen3-8B --target_device CPU --task text_generation --weight-format int8
 ```
 ::::{tab-set}
 :::{tab-item} With Docker
@@ -64,7 +64,7 @@ docker run $(id -u):$(id -g) --rm -v <model_repository_path>:/models:rw openvino
 **Required:** OpenVINO Model Server package - see [deployment instructions](./deploying_server_baremetal.md) for details.
 
 ```bat
-ovms --pull --source_model "Qwen/Qwen3-8B" --model_repository_path /models --model_name Qwen3-8B --task text_generation --weight-format int8
+ovms --pull --source_model "Qwen/Qwen3-8B" --model_repository_path models --model_name Qwen3-8B --task text_generation --weight-format int8
 ```
 :::
 ::::
