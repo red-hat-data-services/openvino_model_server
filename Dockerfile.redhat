@@ -110,8 +110,7 @@ ARG VERBOSE_LOGS=OFF
 ARG LTO_ENABLE=OFF
 
 # hadolint ignore=DL3041
-RUN dnf install -y https://vault.centos.org/centos/8-stream/PowerTools/x86_64/os/Packages/opencl-headers-2.2-1.20180306gite986688.el8.noarch.rpm && \
-            dnf update -d6 -y && dnf install -d6 -y \
+RUN dnf install -y https://vault.centos.org/centos/8-stream/PowerTools/x86_64/os/Packages/opencl-headers-2.2-1.20180306gite986688.el8.noarch.rpm \
             gdb \
             java-11-openjdk-devel \
             tzdata-java \
@@ -258,9 +257,6 @@ COPY *\.bzl /ovms/
 COPY yarn.lock /ovms/
 COPY package.json /ovms/
 
-# prebuild dependencies before copying sources
-RUN bazel build --jobs=$JOBS ${debug_bazel_flags} //:ovms_dependencies @com_google_googletest//:gtest
-
 # hadolint ignore=DL3059
 RUN cp -v /etc/ssl/certs/ca-bundle.crt /etc/ssl/certs/ca-certificates.crt
 
@@ -287,16 +283,15 @@ RUN bash -c "sed -i -e 's|REPLACE_PROJECT_VERSION|${PROJECT_VERSION}|g' /ovms/sr
     if [ "$ov_use_binary" == "0" ] ; then sed -i -e "s#REPLACE_OPENVINO_NAME#$(git --git-dir /openvino/.git log -n 1 | head -n 1 | cut -d' ' -f2 | head -c 12)#g" /ovms/src/version.hpp ; fi && \
     bash -c "sed -i -e 's|REPLACE_BAZEL_BUILD_FLAGS|${debug_bazel_flags}${minitrace_flags}|g' /ovms/src/version.hpp"
 
-# Custom Nodes
-RUN bazel build --jobs=$JOBS ${debug_bazel_flags} //src:release_custom_nodes
-
 # OVMS
 ARG OPTIMIZE_BUILDING_TESTS=0
 RUN rm -f /usr/lib64/cmake/OpenSSL/OpenSSLConfig.cmake
 # Builds unit tests together with ovms server in one step
 # It speeds up CI when tests are executed outside of the image building
 # hadolint ignore=SC2046
-RUN bazel build --jobs=$JOBS ${debug_bazel_flags} ${minitrace_flags} //src:ovms $(if [ "$OPTIMIZE_BUILDING_TESTS" == "1" ] ; then echo -n //src:ovms_test; fi)
+RUN bazel build --jobs=$JOBS ${debug_bazel_flags} //:ovms_dependencies @com_google_googletest//:gtest && \
+  bazel build --jobs=$JOBS ${debug_bazel_flags} //src:release_custom_nodes && \
+  bazel build --jobs=$JOBS ${debug_bazel_flags} ${minitrace_flags} //src:ovms $(if [ "$OPTIMIZE_BUILDING_TESTS" == "1" ] ; then echo -n //src:ovms_test; fi)
 
 # Tests execution
 COPY ci/check_coverage.bat /ovms/
@@ -432,10 +427,10 @@ COPY --from=pkg /licenses /licenses
 # Setup Python Demos Environment
 COPY demos/python_demos/requirements.txt .
 RUN if [ -f /usr/bin/dnf ] ; then export DNF_TOOL=dnf ; \
-	else export DNF_TOOL=microdnf ; fi ; \
-	$DNF_TOOL install -y python3-pip git iproute net-tools ; $DNF_TOOL clean all ; \
-	pip3 install --no-cache-dir -r requirements.txt ; \
-	rm -f requirements.txt
+       else export DNF_TOOL=microdnf ; fi ; \
+       $DNF_TOOL install -y python3-pip git iproute net-tools ; $DNF_TOOL clean all ; \
+       pip3 install --no-cache-dir -r requirements.txt ; \
+       rm -f requirements.txt
 
 USER ovms
 ENTRYPOINT ["/ovms/bin/ovms"]
