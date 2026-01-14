@@ -225,7 +225,7 @@ ARG SDL_OPS="-fpic -O2 -U_FORTIFY_SOURCE -fstack-protector -fno-omit-frame-point
 
 RUN if ! [[ $debug_bazel_flags == *"_py_off"* ]]; then \  
 # python tokenizers built always from source because it is not in binary package
-    git clone https://github.com/$ov_tokenizers_org/openvino_tokenizers.git /openvino_tokenizers && cd /openvino_tokenizers && git checkout $ov_tokenizers_branch && git submodule update --init --recursive && \
+    git clone https://github.com/$ov_tokenizers_org/openvino_tokenizers.git /openvino_tokenizers && cd /openvino_tokenizers && git checkout 85be884a69f10270703f81f970a5ee596a4c8df7 && git submodule update --init --recursive && \
     sed -i '/openvino~=/d' /openvino_tokenizers/pyproject.toml && \
     sed -i '/requires-python/d' /openvino_tokenizers/pyproject.toml && \
     cd /openvino_tokenizers && cmake -DCMAKE_BUILD_TYPE=Release -DCMAKE_VERBOSE_MAKEFILE="${VERBOSE_LOGS}" -DCMAKE_CXX_FLAGS=" ${SDL_OPS} ${LTO_CXX_FLAGS} " -DCMAKE_SHARED_LINKER_FLAGS="${LTO_LD_FLAGS}" -S ./ -B ./build/  && cmake --build ./build/ --parallel $JOBS && cp /openvino_tokenizers/build/src/lib*.so /opt/intel/openvino/runtime/lib/intel64/ && \
@@ -238,7 +238,7 @@ ARG ov_genai_branch=master
 ARG ov_genai_org=openvinotoolkit
 # hadolint ignore=DL3003
 RUN if [ "$ov_use_binary" == "0" ]; then true ; else exit 0 ; fi ; \
-    git clone https://github.com/$ov_genai_org/openvino.genai /openvino_genai && cd /openvino_genai && git checkout $ov_genai_branch && git submodule update --init --recursive ; \
+    git clone https://github.com/$ov_genai_org/openvino.genai /openvino_genai && cd /openvino_genai && git checkout aae98de0cd99303e989c36392bf01026f9fd8000 && git submodule update --init --recursive ; \
     cmake -DCMAKE_BUILD_TYPE=$CMAKE_BUILD_TYPE -DCMAKE_CXX_FLAGS=" ${SDL_OPS}  ${LTO_CXX_FLAGS} " -DCMAKE_SHARED_LINKER_FLAGS="${LTO_LD_FLAGS}" -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DENABLE_SYSTEM_ICU="True" -DBUILD_TOKENIZERS=OFF -DENABLE_SAMPLES=OFF -DENABLE_TOOLS=OFF -DENABLE_TESTS=OFF -DENABLE_XGRAMMAR=ON -S ./ -B ./build/ ; \ 
     cmake --build ./build/ --parallel $JOBS && cp /openvino_genai/build/openvino_genai/lib*.so* /opt/intel/openvino/runtime/lib/intel64/ ; \
     cp -r /openvino_genai/src/cpp/include/* /opt/intel/openvino/runtime/include/ ; \
@@ -428,12 +428,12 @@ COPY --from=pkg /usr/local/lib64/python3.*/site-packages/markupsafe /ovms/python
 COPY --from=pkg /licenses /licenses
 
 # Setup Python Demos Environment
-COPY demos/python_demos/requirements.txt .
+COPY demos/python_demos/base-requirements.txt .
 RUN if [ -f /usr/bin/dnf ] ; then export DNF_TOOL=dnf ; \
 	else export DNF_TOOL=microdnf ; fi ; \
 	$DNF_TOOL install -y python3-pip git iproute net-tools ; $DNF_TOOL clean all ; \
-	pip3 install --no-cache-dir -r requirements.txt ; \
-	rm -f requirements.txt
+	pip3 install --no-cache-dir -r base-requirements.txt ; \
+	rm -f base-requirements.txt
 
 USER ovms
 ENTRYPOINT ["/ovms/bin/ovms"]
