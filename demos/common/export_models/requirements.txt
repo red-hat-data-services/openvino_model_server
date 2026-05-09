@@ -14,7 +14,7 @@ openvino==2026.0.0rc3
 pillow
 sentence_transformers
 sentencepiece  # Required by: transformers
-timm==1.0.22
+timm==1.0.27
 torchvision
 torch==2.9.1+cpu
 transformers<4.58
