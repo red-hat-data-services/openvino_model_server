@@ -3,7 +3,7 @@ optimum-intel@git+https://github.com/huggingface/optimum-intel.git@2ca7f8bb09d53
 pillow==12.2.0
 tritonclient[grpc]==2.57.0  # Required to use batch string serialization/deserialization (4byte length prepend)
 numpy<2.0
-huggingface_hub==0.32.0
+huggingface_hub==0.36.2
 nncf>=2.11.0
 sentence_transformers==5.3.0
 sentencepiece==0.2.1
