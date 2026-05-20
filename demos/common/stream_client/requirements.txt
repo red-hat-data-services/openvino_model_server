@@ -1,5 +1,5 @@
 tritonclient[grpc]
 ffmpeg-python==0.2.0
 opencv-python==4.9.0.80
-protobuf==5.29.6
+protobuf==7.35.0
 numpy<2.0.0
