@@ -7,7 +7,7 @@ huggingface_hub==0.32.0
 nncf@git+https://github.com/openvinotoolkit/nncf.git@7a6ac29a15d247c0fc76da93f4d53bbfa7b489cc
 sentence_transformers
 sentencepiece==0.2.1
-transformers<=4.53
+transformers<=5.9.0
 einops
 torchvision
 timm==1.0.15
