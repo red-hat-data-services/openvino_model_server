@@ -95,7 +95,7 @@ jobs:
         run: |
           docker save openvino/model_server:latest | gzip > model-server-image.tar.gz
       - name: Upload image artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: model-server-image
           path: model-server-image.tar.gz
@@ -155,7 +155,7 @@ jobs:
         with:
           ref: ${{ needs.setup.outputs.source_ref }}
       - name: Download Docker image
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: model-server-image
       - name: Load Docker image
@@ -197,7 +197,7 @@ jobs:
         with:
           ref: ${{ needs.setup.outputs.source_ref }}
       - name: Download Docker image
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: model-server-image
       - name: Load Docker image
@@ -243,7 +243,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Download Docker image
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: model-server-image
       - name: Load Docker image
@@ -289,7 +289,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Download Docker image
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: model-server-image
       - name: Load Docker image
@@ -335,7 +335,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Download Docker image
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: model-server-image
       - name: Load Docker image
