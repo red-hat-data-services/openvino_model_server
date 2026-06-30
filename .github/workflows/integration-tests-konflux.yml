@@ -95,7 +95,7 @@ jobs:
             -f description="Running file integrity tests..." \
             -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.setup.outputs.source_ref }}
       - name: Download Docker image
@@ -147,7 +147,7 @@ jobs:
             -f description="Running Python client tests..." \
             -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.setup.outputs.source_ref }}
       - name: Download Docker image
@@ -199,7 +199,7 @@ jobs:
             -f description="Running latency tests..." \
             -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.setup.outputs.source_ref }}
       - name: Set up Python
@@ -255,7 +255,7 @@ jobs:
             -f description="Running throughput tests..." \
             -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.setup.outputs.source_ref }}
       - name: Set up Python
@@ -311,7 +311,7 @@ jobs:
             -f description="Running functional tests..." \
             -f target_url="${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.setup.outputs.source_ref }}
       - name: Set up Python
