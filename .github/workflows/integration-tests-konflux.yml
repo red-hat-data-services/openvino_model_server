@@ -203,7 +203,7 @@ jobs:
         with:
           ref: ${{ needs.setup.outputs.source_ref }}
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - name: Download Docker image
@@ -259,7 +259,7 @@ jobs:
         with:
           ref: ${{ needs.setup.outputs.source_ref }}
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - name: Download Docker image
@@ -315,7 +315,7 @@ jobs:
         with:
           ref: ${{ needs.setup.outputs.source_ref }}
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - name: Download Docker image
