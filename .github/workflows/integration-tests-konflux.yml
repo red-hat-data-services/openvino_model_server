@@ -151,7 +151,7 @@ jobs:
     needs: [setup, pull-image]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.setup.outputs.source_ref }}
       - name: Download Docker image
@@ -193,7 +193,7 @@ jobs:
     needs: [setup, pull-image]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.setup.outputs.source_ref }}
       - name: Download Docker image
@@ -235,7 +235,7 @@ jobs:
     needs: [setup, pull-image]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.setup.outputs.source_ref }}
       - name: Set up Python
@@ -281,7 +281,7 @@ jobs:
     needs: [setup, pull-image]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.setup.outputs.source_ref }}
       - name: Set up Python
@@ -327,7 +327,7 @@ jobs:
     needs: [setup, pull-image]
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ needs.setup.outputs.source_ref }}
       - name: Set up Python
