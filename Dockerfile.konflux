@@ -14,7 +14,7 @@
 # limitations under the License.
 #
 
-ARG BASE_IMAGE=registry.access.redhat.com/ubi9/ubi:9.7
+ARG BASE_IMAGE=registry.access.redhat.com/ubi9/ubi:9.8-1788245065
 ARG BUILD_IMAGE=build
 ARG PKG_IMAGE=pkg
 ARG RELEASE_BASE_IMAGE=registry.redhat.io/ubi9/ubi-minimal-pqc@sha256:8a842ac769de709143e4edeace516f2008dfdc431b64670ad3353fa323b44736
