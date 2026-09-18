@@ -17,7 +17,7 @@
 ARG BASE_IMAGE=registry.access.redhat.com/ubi9/ubi:9.7
 ARG BUILD_IMAGE=build
 ARG PKG_IMAGE=pkg
-ARG RELEASE_BASE_IMAGE=registry.redhat.io/ubi9/ubi-minimal-pqc@sha256:8a842ac769de709143e4edeace516f2008dfdc431b64670ad3353fa323b44736
+ARG RELEASE_BASE_IMAGE=registry.redhat.io/ubi9/ubi-minimal-pqc@sha256:fac0bde5012de6a8475bb5dc18db968cdc90b12d9dc2ffaddb4a4975d0b8a04f
 
 FROM $BASE_IMAGE as base_build
 ARG BASE_IMAGE=registry.access.redhat.com/ubi9/ubi:9.7
