@@ -21,7 +21,7 @@ go 1.24.0
 require (
 	github.com/golang/protobuf v1.5.4
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646
-	gocv.io/x/gocv v0.35.0
+	gocv.io/x/gocv v0.43.0
 	google.golang.org/grpc v1.79.3
 )
 
