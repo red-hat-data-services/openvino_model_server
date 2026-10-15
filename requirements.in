@@ -1,0 +1,3 @@
+# OpenVino CPU torch environment dependencies
+openvino==2026.4.0
+torch==2.13.0
