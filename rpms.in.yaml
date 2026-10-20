@@ -1,0 +1,28 @@
+# Keep these top-level requests identical to Dockerfile.konflux. The generated
+# rpms.lock.yaml pins every resolved package, including unversioned requests.
+packages:
+  - openvino_model_server-2026.4.0-1.el9
+  - openvino-2026.4.0-13.el9
+  - openvino-genai-2026.4.0.0-1.el9
+  - openvino_tokenizers-2026.4.0.0-1.el9
+  - ovms-abseil-cpp
+  - ovms-azure-sdk-for-cpp
+  - ovms-google-crc32c
+  - ovms-libgguf
+  - ovms-onnx-libs
+  - ovms-opencv
+  - ovms-protobuf
+  - ovms-protobuf-lite
+  - ovms-pugixml
+  - ovms-tbb-2022.3.0-4.el9ai
+  - ovms-xgrammar
+contentOrigin:
+  repofiles:
+    - ./ovms.repo
+arches:
+  - x86_64
+installWeakDeps: false
+context:
+  containerfile:
+    file: Dockerfile.konflux
+    stageNum: 0
