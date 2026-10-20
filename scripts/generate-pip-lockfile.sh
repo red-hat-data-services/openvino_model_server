@@ -23,70 +23,27 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-BASE_IMAGE=$(grep '^BASE_IMAGE=' "${REPO_ROOT}/build-args/ubi9.conf" | cut -d= -f2)
+BASE_IMAGE=$(awk '$1 == "FROM" { print $2; exit }' "${REPO_ROOT}/Dockerfile.konflux")
+AIPCC_INDEX=${AIPCC_INDEX:-https://packages.redhat.com/api/pypi/public-rhai/rhoai/3.6/cpu-ubi9/simple/}
+if [[ ${BASE_IMAGE} != *@sha256:* ]]; then
+    echo 'Dockerfile.konflux must select a literal digest-pinned base image.' >&2
+    exit 2
+fi
 
-# AIPCC public index — contains torch pre-built Linux wheels (built by fondue).
-# Use the test distribution until the prod distribution for 3.6-EA2 is published.
-AIPCC_INDEX="https://packages.redhat.com/api/pypi/public-rhai/rhoai/3.6-EA2/cpu-ubi9-test/simple/"
-
-echo "Generating requirements.txt inside: ${BASE_IMAGE}"
+echo "Resolving requirements.in with the x86_64 Python 3.12 base: ${BASE_IMAGE}"
 echo "Using index: ${AIPCC_INDEX}"
 
-podman run --rm \
-    --platform linux/amd64 \
-    --user 0 \
-    -v "${REPO_ROOT}:/work:z" \
-    -e AIPCC_INDEX="${AIPCC_INDEX}" \
-    --interactive \
-    "${BASE_IMAGE}" \
-    bash << 'CONTAINERSCRIPT'
-
-set -euo pipefail
-cd /work
-
-pip install pip-tools --index-url https://pypi.org/simple/ -q
-
-pip-compile requirements.in \
-    --index-url "${AIPCC_INDEX}" \
-    --allow-unsafe \
-    --upgrade \
-    --generate-hashes \
+podman run --rm --pull=never --platform linux/amd64 --user 0 \
+    --workdir /work -v "${REPO_ROOT}:/work:z" \
+    -e AIPCC_INDEX="${AIPCC_INDEX}" -e UV_CACHE_DIR=/tmp/uv-cache \
+    --entrypoint /bin/bash "${BASE_IMAGE}" -euc '
+uv pip compile requirements.in \
+    --config-file /dev/null \
+    --default-index "${AIPCC_INDEX}" --emit-index-url \
+    --python /opt/app-root/bin/python3.12 \
+    --python-platform x86_64-manylinux_2_34 \
+    --no-python-downloads --only-binary=:all: \
+    --generate-hashes --upgrade \
+    --custom-compile-command scripts/generate-pip-lockfile.sh \
     --output-file requirements.txt
-
-# Strip pip options that Hermeto does not support.
-# sympy/networkx/mpmath are pure-Python torch deps pre-installed in the base image.
-# Keep --index-url: Hermeto reads it to know where to fetch packages during prefetch.
-grep -v \
-    -e "^--extra-index-url" \
-    -e "^--only-binary" \
-    -e "^--prefer-binary" \
-    -e "^sympy==" \
-    -e "^networkx==" \
-    -e "^mpmath==" \
-    requirements.txt > requirements.txt.tmp && mv requirements.txt.tmp requirements.txt
-
-# Flatten multi-line hash entries to single lines — Hermeto requires
-# --hash options on the same line as the package requirement.
-python3 - << 'PYEOF'
-import re
-with open("requirements.txt") as f:
-    lines = f.readlines()
-output = []
-for line in lines:
-    stripped = line.rstrip("\n")
-    if re.match(r"^\s+#", stripped):
-        continue
-    if re.match(r"^\s+--hash=", stripped):
-        if output:
-            hashes = re.findall(r"--hash=\S+", stripped)
-            prev = re.sub(r"\s*\\\s*$", "", output[-1].rstrip("\n"))
-            output[-1] = prev + " " + " ".join(hashes) + "\n"
-        continue
-    output.append(line)
-with open("requirements.txt", "w") as f:
-    f.writelines(output)
-print("Flattened", len(output), "entries")
-PYEOF
-
-echo "Done: requirements.txt updated"
-CONTAINERSCRIPT
+'
