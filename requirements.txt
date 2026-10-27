@@ -36,8 +36,9 @@ openvino==2026.4.0 \
 openvino-telemetry==2025.2.0 \
     --hash=sha256:60634b6c51ecdf88be2bccc693277980e5d6458d35668afd457820901adac7f7
     # via openvino
-setuptools==84.0.0 \
-    --hash=sha256:54551c2da1e47baf2c91b9c2ff07d616ae51cbc1c6c65e5f73103a826824c954
+setuptools==84.2.0 \
+    --hash=sha256:6f445ca2ce864605f81e223f262b4c94ffcb9a4a63473bae0ed7be5aab0291da \
+    --hash=sha256:8cc107ac7a403105dc8d6477664171f36135fab26adf8b5e0edaebc313f39b21
     # via torch
 sympy==1.14.0 \
     --hash=sha256:81dbea23f327bb7d1eeee8331d441a023a7cb718ebdbda97a25a22c93b31025d
