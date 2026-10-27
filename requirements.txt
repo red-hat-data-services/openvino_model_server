@@ -2,8 +2,9 @@
 #    scripts/generate-pip-lockfile.sh
 --index-url https://packages.redhat.com/api/pypi/public-rhai/rhoai/3.6/cpu-ubi9/simple/
 
-filelock==4.2.0 \
-    --hash=sha256:8fd3636cd39bfa2c72c5b22120057ede006f92fbf3f48ea06c58ce75f9bc5d30
+filelock==4.2.4 \
+    --hash=sha256:301241438c57936ef93f4243a94f2559022268bfcf9b375a9a72eb0f8db8358e \
+    --hash=sha256:c6d8663535e1650ee430507b4ffbac7b464dd64b7647ea0112a9f406499d163d
     # via torch
 fsspec==2026.9.0 \
     --hash=sha256:a99129ba2d61ae9036fd1b4343f279e15a8799f1b7245fd959d037bd4754671f
