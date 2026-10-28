@@ -42,7 +42,7 @@ spec:
   - name: hermetic
     value: false
   - name: prefetch-input
-    value: '[{"type":"rpm","path":"."},{"type":"pip","path":"."}]'
+    value: '[{"type":"rpm","path":"."},{"type":"pip","path":".","binary":{"packages":":all:","py_version":312}}]'
   - name: build-source-image
     value: true
   - name: build-image-index
