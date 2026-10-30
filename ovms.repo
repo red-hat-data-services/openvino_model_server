@@ -1,0 +1,10 @@
+# TEMPLATE ONLY: copy outside this checkout, then edit the binary repository
+# URL there by hand. Do not put internal endpoints into this file.
+# Confirm the product signing key and retain TLS/signature verification.
+# This is a lock-generation input, NOT a repository installed into the image.
+[ovms-rhel9-rpms]
+name=OVMS RHEL 9 x86_64 binaries - PLACEHOLDER
+baseurl=https://example.invalid/REPLACE-ME/ovms/rhel9/$basearch/os/
+enabled=1
+gpgcheck=1
+gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-redhat-release
