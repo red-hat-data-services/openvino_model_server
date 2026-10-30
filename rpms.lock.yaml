@@ -1,0 +1,162 @@
+---
+lockfileVersion: 1
+lockfileVendor: redhat
+arches:
+- arch: x86_64
+  packages:
+  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/rhelai/3.6/os/Packages/l/libopenvino-intel-cpu-plugin-2026.4.0-14.el9ai.x86_64.rpm
+    repoid: ovms-rhel9-rpms
+    size: 13105208
+    checksum: sha256:169fb1b179fba955843dd82dccda253275110ea9421a95ad00e7dac892d33574
+    name: libopenvino-intel-cpu-plugin
+    evr: 2026.4.0-14.el9ai
+    sourcerpm: openvino-2026.4.0-14.el9ai.src.rpm
+  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/rhelai/3.6/os/Packages/l/libopenvino-ir-frontend-2026.4.0-14.el9ai.x86_64.rpm
+    repoid: ovms-rhel9-rpms
+    size: 219292
+    checksum: sha256:0f98228928d3f03a47ab84c8950db81970dad7590baf3f8a47889979a9c22d40
+    name: libopenvino-ir-frontend
+    evr: 2026.4.0-14.el9ai
+    sourcerpm: openvino-2026.4.0-14.el9ai.src.rpm
+  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/rhelai/3.6/os/Packages/l/libopenvino-onnx-frontend-2026.4.0-14.el9ai.x86_64.rpm
+    repoid: ovms-rhel9-rpms
+    size: 1114215
+    checksum: sha256:e61ad345e193b2eb182a408e2c6d9b5c9ecc9231e7346765cc7559d67b0dfd8a
+    name: libopenvino-onnx-frontend
+    evr: 2026.4.0-14.el9ai
+    sourcerpm: openvino-2026.4.0-14.el9ai.src.rpm
+  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/rhelai/3.6/os/Packages/l/libopenvino-paddle-frontend-2026.4.0-14.el9ai.x86_64.rpm
+    repoid: ovms-rhel9-rpms
+    size: 494883
+    checksum: sha256:3b31d571130c15e9ed5457f7f28532a56b7d7338334e6f0de423068911f1f7d5
+    name: libopenvino-paddle-frontend
+    evr: 2026.4.0-14.el9ai
+    sourcerpm: openvino-2026.4.0-14.el9ai.src.rpm
+  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/rhelai/3.6/os/Packages/l/libopenvino-pytorch-frontend-2026.4.0-14.el9ai.x86_64.rpm
+    repoid: ovms-rhel9-rpms
+    size: 1024115
+    checksum: sha256:398ed8b5a352cee7ed81ec3cf021a9e4abcbc2bd7d08d49875e06d04b37bad5a
+    name: libopenvino-pytorch-frontend
+    evr: 2026.4.0-14.el9ai
+    sourcerpm: openvino-2026.4.0-14.el9ai.src.rpm
+  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/rhelai/3.6/os/Packages/l/libopenvino-tensorflow-frontend-2026.4.0-14.el9ai.x86_64.rpm
+    repoid: ovms-rhel9-rpms
+    size: 1117417
+    checksum: sha256:4328507f4290f94492e920a26339d394b928ae77c9de3bfba44441e0ed14ed19
+    name: libopenvino-tensorflow-frontend
+    evr: 2026.4.0-14.el9ai
+    sourcerpm: openvino-2026.4.0-14.el9ai.src.rpm
+  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/rhelai/3.6/os/Packages/l/libopenvino-tensorflow-lite-frontend-2026.4.0-14.el9ai.x86_64.rpm
+    repoid: ovms-rhel9-rpms
+    size: 422087
+    checksum: sha256:e63b059cab191aeb028fbe1e1bd4c999bb8396d4ac60ada9360971885604e689
+    name: libopenvino-tensorflow-lite-frontend
+    evr: 2026.4.0-14.el9ai
+    sourcerpm: openvino-2026.4.0-14.el9ai.src.rpm
+  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/rhelai/3.6/os/Packages/o/openvino-2026.4.0-14.el9ai.x86_64.rpm
+    repoid: ovms-rhel9-rpms
+    size: 5734988
+    checksum: sha256:fca7637e2bea80430bcd4c20ddcb455b6964936d0f35e04df9f18a2fd1324392
+    name: openvino
+    evr: 2026.4.0-14.el9ai
+    sourcerpm: openvino-2026.4.0-14.el9ai.src.rpm
+  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/rhelai/3.6/os/Packages/o/openvino-genai-2026.4.0.0-1.el9ai.x86_64.rpm
+    repoid: ovms-rhel9-rpms
+    size: 3048047
+    checksum: sha256:51bde5fdd7c8ff88c06acd4ac7b0ed7b28e3c13668e08d4556163ad509ed4337
+    name: openvino-genai
+    evr: 2026.4.0.0-1.el9ai
+    sourcerpm: openvino-genai-2026.4.0.0-1.el9ai.src.rpm
+  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/rhelai/3.6/os/Packages/o/openvino_model_server-2026.4.0-3.el9ai.x86_64.rpm
+    repoid: ovms-rhel9-rpms
+    size: 11897500
+    checksum: sha256:bbfec9ba34eef7d6c2749638c3a50de3654ec402a28e21f6a34b2601ae57012a
+    name: openvino_model_server
+    evr: 2026.4.0-3.el9ai
+    sourcerpm: openvino_model_server-2026.4.0-3.el9ai.src.rpm
+  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/rhelai/3.6/os/Packages/o/openvino_tokenizers-2026.4.0.0-1.el9ai.x86_64.rpm
+    repoid: ovms-rhel9-rpms
+    size: 996074
+    checksum: sha256:5cb8f0281d7b79c60edaaeb06f36c9b6eb24734e35464337634e2bc405d4fec9
+    name: openvino_tokenizers
+    evr: 2026.4.0.0-1.el9ai
+    sourcerpm: openvino_tokenizers-2026.4.0.0-1.el9ai.src.rpm
+  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/rhelai/3.6/os/Packages/o/ovms-abseil-cpp-20240116.0-1.el9ai.x86_64.rpm
+    repoid: ovms-rhel9-rpms
+    size: 663906
+    checksum: sha256:e1919ee1357d409dc869fbdb65da00423ff885e5a8d7443049f2310aa851cf2f
+    name: ovms-abseil-cpp
+    evr: 20240116.0-1.el9ai
+    sourcerpm: ovms-abseil-cpp-20240116.0-1.el9ai.src.rpm
+  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/rhelai/3.6/os/Packages/o/ovms-azure-sdk-for-cpp-12.18.0-1.el9ai.x86_64.rpm
+    repoid: ovms-rhel9-rpms
+    size: 956257
+    checksum: sha256:9554e7162693702e1a3c69c676e5854a841d824dfc0d0c3815152736097feb10
+    name: ovms-azure-sdk-for-cpp
+    evr: 12.18.0-1.el9ai
+    sourcerpm: ovms-azure-sdk-for-cpp-12.18.0-1.el9ai.src.rpm
+  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/rhelai/3.6/os/Packages/o/ovms-google-crc32c-1.1.2-1.el9ai.x86_64.rpm
+    repoid: ovms-rhel9-rpms
+    size: 21657
+    checksum: sha256:1cc80b08fceb8568957be93ad3d9a37f3632b2ec1dfa89163a092a3ab2a61f31
+    name: ovms-google-crc32c
+    evr: 1.1.2-1.el9ai
+    sourcerpm: ovms-google-crc32c-1.1.2-1.el9ai.src.rpm
+  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/rhelai/3.6/os/Packages/o/ovms-libgguf-0^20241104gitbac796a-1.el9ai.x86_64.rpm
+    repoid: ovms-rhel9-rpms
+    size: 18763
+    checksum: sha256:70e3565eee1d7dfd7d26c14aaa022654f71440bbd21b910f5f7b68496c61f290
+    name: ovms-libgguf
+    evr: 0^20241104gitbac796a-1.el9ai
+    sourcerpm: ovms-gguf-tools-0^20241104gitbac796a-1.el9ai.src.rpm
+  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/rhelai/3.6/os/Packages/o/ovms-onnx-libs-1.22.0-13.el9ai.x86_64.rpm
+    repoid: ovms-rhel9-rpms
+    size: 1052189
+    checksum: sha256:98a3375d9ae9eb765d8ddb98a914218eff2e8ee2f99aacc339085bdad5022dc3
+    name: ovms-onnx-libs
+    evr: 1.22.0-13.el9ai
+    sourcerpm: ovms-onnx-1.22.0-13.el9ai.src.rpm
+  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/rhelai/3.6/os/Packages/o/ovms-opencv-4.14.0-1.el9ai.x86_64.rpm
+    repoid: ovms-rhel9-rpms
+    size: 5736702
+    checksum: sha256:cc1ea4aff5732a7615a0e562830025b789de3de973b69f22422132427c2322e9
+    name: ovms-opencv
+    evr: 4.14.0-1.el9ai
+    sourcerpm: ovms-opencv-4.14.0-1.el9ai.src.rpm
+  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/rhelai/3.6/os/Packages/o/ovms-protobuf-5.26.0-22.el9ai.x86_64.rpm
+    repoid: ovms-rhel9-rpms
+    size: 2144279
+    checksum: sha256:9381a9ba983a9e78fbafcc18916a6c996fc374161235c0510841737c129bbb66
+    name: ovms-protobuf
+    evr: 5.26.0-22.el9ai
+    sourcerpm: ovms-protobuf-5.26.0-22.el9ai.src.rpm
+  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/rhelai/3.6/os/Packages/o/ovms-protobuf-lite-5.26.0-22.el9ai.x86_64.rpm
+    repoid: ovms-rhel9-rpms
+    size: 251467
+    checksum: sha256:d2081282ddfc759d7daa52006a6069104c775f8f3bb9f42489ea1bd9a27e898e
+    name: ovms-protobuf-lite
+    evr: 5.26.0-22.el9ai
+    sourcerpm: ovms-protobuf-5.26.0-22.el9ai.src.rpm
+  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/rhelai/3.6/os/Packages/o/ovms-pugixml-1.16-2.el9ai.x86_64.rpm
+    repoid: ovms-rhel9-rpms
+    size: 108672
+    checksum: sha256:7789438849efef58a3491ea7b4bbc59a841abb0d99a67585421e23a6123d6eff
+    name: ovms-pugixml
+    evr: 1.16-2.el9ai
+    sourcerpm: ovms-pugixml-1.16-2.el9ai.src.rpm
+  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/rhelai/3.6/os/Packages/o/ovms-tbb-2022.3.0-6.el9ai.x86_64.rpm
+    repoid: ovms-rhel9-rpms
+    size: 169206
+    checksum: sha256:6fe7e3d3120efdc4b51f7b1f7c30578c6d005849a4a5c973e9528b1091a8601a
+    name: ovms-tbb
+    evr: 2022.3.0-6.el9ai
+    sourcerpm: ovms-tbb-2022.3.0-6.el9ai.src.rpm
+  - url: https://rhsm-pulp.corp.redhat.com/content/dist/layered/rhel9/x86_64/rhelai/3.6/os/Packages/o/ovms-xgrammar-0.1.31-1.el9ai.x86_64.rpm
+    repoid: ovms-rhel9-rpms
+    size: 519158
+    checksum: sha256:860a3c2133b91bc63594a07f0e4ceeb7054522d6ce0084ce05fdf3b8a7c7f850
+    name: ovms-xgrammar
+    evr: 0.1.31-1.el9ai
+    sourcerpm: ovms-xgrammar-0.1.31-1.el9ai.src.rpm
+  source: []
+  module_metadata: []

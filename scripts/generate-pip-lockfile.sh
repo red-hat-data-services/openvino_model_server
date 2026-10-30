@@ -37,6 +37,16 @@ podman run --rm --pull=never --platform linux/amd64 --user 0 \
     --workdir /work -v "${REPO_ROOT}:/work:z" \
     -e AIPCC_INDEX="${AIPCC_INDEX}" -e UV_CACHE_DIR=/tmp/uv-cache \
     --entrypoint /bin/bash "${BASE_IMAGE}" -euc '
+# Check the network-facing preparation tools before resolving dependencies.
+python3.12 - <<"PY"
+from importlib.metadata import version
+from pip._vendor.packaging.version import Version
+import subprocess
+
+assert Version(version("pip")) >= Version("26.2.2"), "pip must be >= 26.2.2"
+uv_version = subprocess.check_output(["uv", "--version"], text=True).split()[1]
+assert Version(uv_version) >= Version("0.13.4"), "uv must be >= 0.13.4"
+PY
 uv pip compile requirements.in \
     --config-file /dev/null \
     --default-index "${AIPCC_INDEX}" --emit-index-url \
