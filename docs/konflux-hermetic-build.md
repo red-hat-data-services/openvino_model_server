@@ -37,8 +37,8 @@ The refreshed base inspected on 2026-10-30 contains no .repo files; DNF reports
 no repositories available. Base-image context supplies the installed RPM
 database, not the missing approved package repository URLs. ovms.repo is a
 public template with placeholder endpoints. Copy it outside the checkout and
-edit that private copy with the approved binary and matching source
-repositories, signing keys and any prefetch authentication. It is a
+edit that private copy with the approved binary repository, signing key and
+any prefetch authentication. It is a
 preparation input and must not be installed in the production image.
 
 If the approved repository is internal, keep its URL/configuration outside
@@ -63,8 +63,11 @@ are installed by the helper, and no Brew download is needed for this route.
 
 Create a private configuration, then open it in your editor and replace the
 placeholders by hand. Only retain enabled repositories with valid endpoints.
-If the binary repository also indexes source RPMs, a separate source section
-is unnecessary; otherwise obtain the matching source repository URL.
+This lock is for installing prebuilt runtime RPMs into the image. Its
+noSources: true setting skips source-RPM lookup; no source repository is
+needed. Remove or disable source-repository sections in older private copies
+of the template. Source-package provenance and source distribution remain
+separate release workflows.
 
 ```sh
 mkdir -m 700 -p "$HOME/ovms-private"
@@ -85,11 +88,10 @@ enabled placeholder URLs and disabled TLS/signature verification. It creates
 a private output directory, snapshots the selected input and Dockerfile, and
 resolves x86_64 only against that base with weak dependencies and erasure
 disabled. It checks the exact requested EVRs, SHA-256/size metadata, HTTPS
-artifact locations, matching source-RPM coverage and absence of development
-or QE packages before writing lock-output/rpms.lock.yaml. The upstream tool
-can warn about missing sources and return success; this helper treats those
-missing sources as a failure. It does not verify downloaded RPM signatures
-or qualify a running image; those remain build/qualification requirements.
+artifact locations and absence of development or QE packages before writing
+lock-output/rpms.lock.yaml. It accepts a binary-only lock without corresponding
+source-RPM entries. It does not verify downloaded RPM signatures or qualify a
+running image; those remain build/qualification requirements.
 
 On failure, read the private lock-output/resolve.log and retain the directory.
 Retry with a fresh output path. TLS-chain failures must be resolved using the

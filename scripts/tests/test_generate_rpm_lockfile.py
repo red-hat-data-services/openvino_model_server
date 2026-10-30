@@ -25,12 +25,7 @@ def fixture_lock():
         checksum="sha256:" + "a" * 64,
         size=10,
     )
-    source = dict(
-        url="https://example.invalid/sample-1-2.src.rpm",
-        checksum="sha256:" + "b" * 64,
-        size=20,
-    )
-    return dict(arches=[dict(arch="x86_64", packages=[binary], source=[source])])
+    return dict(arches=[dict(arch="x86_64", packages=[binary], source=[])])
 
 
 class PrivateLockTests(unittest.TestCase):
@@ -66,7 +61,7 @@ class PrivateLockTests(unittest.TestCase):
 
     def test_incomplete_or_wrong_lock_is_rejected(self):
         for case in (
-            "missing_source",
+            "unexpected_source",
             "wrong_evr",
             "wrong_arch",
             "bad_checksum",
@@ -76,8 +71,10 @@ class PrivateLockTests(unittest.TestCase):
             lock = fixture_lock()
             arch = lock["arches"][0]
             package = arch["packages"][0]
-            if case == "missing_source":
-                arch["source"] = []
+            if case == "unexpected_source":
+                arch["source"] = [
+                    dict(url="https://example.invalid/sample-1-2.src.rpm")
+                ]
             elif case == "wrong_evr":
                 package["evr"] = "1-3"
             elif case == "wrong_arch":
@@ -93,7 +90,7 @@ class PrivateLockTests(unittest.TestCase):
             with self.subTest(case=case), self.assertRaises(ValueError):
                 HELPER.validate_lock(lock, ["sample-1-2"])
 
-    def test_missing_source_never_produces_final_lock(self):
+    def test_binary_only_resolution_and_wrong_evr_finalization(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             checkout, output = root / "checkout", root / "private-output"
@@ -108,9 +105,11 @@ class PrivateLockTests(unittest.TestCase):
             repo = root / "private.repo"
             repo.write_text("[binary]\nbaseurl=https://example.com/\n")
 
+            lock = fixture_lock()
+
             def resolve_without_sources(command, **kwargs):
-                lock = fixture_lock()
-                lock["arches"][0]["source"] = []
+                config = yaml.safe_load(Path(command[-1]).read_text())
+                self.assertIs(config["noSources"], True)
                 Path(command[command.index("--outfile") + 1]).write_text(
                     yaml.safe_dump(lock)
                 )
@@ -119,10 +118,17 @@ class PrivateLockTests(unittest.TestCase):
             with patch.object(HELPER, "REPO_ROOT", checkout), patch.object(
                 HELPER.subprocess, "run", side_effect=resolve_without_sources
             ):
-                with self.assertRaisesRegex(ValueError, "Missing matching source RPMs"):
-                    HELPER.resolve(output, repo)
-            self.assertFalse((output / "rpms.lock.yaml").exists())
-            self.assertTrue((output / "rpms.resolved.yaml").exists())
+                HELPER.resolve(output, repo)
+                self.assertTrue((output / "rpms.lock.yaml").exists())
+                # A missing source is allowed, but an incorrect binary EVR
+                # must still prevent finalizing the lock.
+                lock["arches"][0]["packages"][0]["evr"] = "1-3"
+                failed_output = root / "failed-output"
+                failed_output.mkdir()
+                with self.assertRaisesRegex(ValueError, "exact runtime EVR absent"):
+                    HELPER.resolve(failed_output, repo)
+            self.assertFalse((failed_output / "rpms.lock.yaml").exists())
+            self.assertTrue((failed_output / "rpms.resolved.yaml").exists())
             self.assertFalse((checkout / "rpms.lock.yaml").exists())
 
 

@@ -21,6 +21,9 @@ contentOrigin:
     - ./ovms.repo
 arches:
   - x86_64
+# This lock prefetches already-built runtime RPMs for image assembly.
+# Source-package provenance and distribution are handled separately.
+noSources: true
 installWeakDeps: false
 context:
   containerfile:

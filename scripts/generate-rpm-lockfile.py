@@ -9,7 +9,7 @@ from pathlib import Path
 import re
 import shutil
 import subprocess
-from urllib.parse import unquote, urlsplit
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -57,21 +57,16 @@ def validate_lock(lock, requested):
     arch = arches[0]
     if arch.get("module_metadata"):
         raise ValueError("Unexpected module metadata requires review")
-    packages, sources = arch.get("packages", []), arch.get("source", [])
-    for item in packages + sources:
+    packages = arch.get("packages", [])
+    if arch.get("source"):
+        raise ValueError("Image assembly lock must contain binary RPMs only")
+    for item in packages:
         if urlsplit(item["url"]).scheme != "https":
             raise ValueError("Expected HTTPS artifact URLs")
         if not re.fullmatch(r"sha256:[0-9a-f]{64}", item.get("checksum", "")):
             raise ValueError("Expected SHA-256 artifact checksums")
         if not isinstance(item.get("size"), int) or item["size"] <= 0:
             raise ValueError("Missing artifact size")
-    source_names = {Path(unquote(urlsplit(item["url"]).path)).name for item in sources}
-    missing = {item.get("sourcerpm") for item in packages} - source_names
-    if missing:
-        raise ValueError(
-            "Missing matching source RPMs; supply source repository coverage: "
-            + repr(sorted(str(name) for name in missing))
-        )
     selected = {item["name"]: item["evr"].removeprefix("0:") for item in packages}
     for nvr in requested:
         name, ver, release = nvr.rsplit("-", 2)
@@ -92,6 +87,9 @@ def resolve(output, repo_file):
     config = yaml.safe_load((REPO_ROOT / "rpms.in.yaml").read_text())
     config["contentOrigin"] = {"repofiles": [str(inputs / "ovms.repo")]}
     config["arches"] = ["x86_64"]
+    # The image consumes prebuilt RPMs. Do not require SRPM availability to
+    # resolve its runtime additions; source delivery is a separate workflow.
+    config["noSources"] = True
     config["installWeakDeps"] = False
     config["allowerasing"] = False
     source = inputs / "rpms.in.yaml"
