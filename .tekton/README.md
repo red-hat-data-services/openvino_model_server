@@ -1,12 +1,14 @@
 # ⚠️ Do Not Modify Files in the `.tekton/` Directory Directly
 
-The `.tekton/` directory in each component repository is **automatically synchronized** from [`konflux-central`](https://github.com/red-hat-data-services/konflux-central) using automation. Any edits made directly to Tekton files in the component repositories will be **overwritten** by the next sync.
+The `.tekton/` directory in each component repository is **automatically synchronized**
+from [`konflux-central`](https://github.com/red-hat-data-services/konflux-central) using automation.
+Any edits made directly to Tekton files in the component repositories will be **overwritten** by the next sync.
 
 All Tekton file updates **must be made in the `konflux-central` repository**.
 
 ## ✅ How to Make Changes
 
-To modify the pipelines for `openvino_model_server` in the `rhoai-3.5` release:
+To modify the pipelines for `openvino_model_server` in the `main` branch:
 
 - Clone the [`konflux-central`](https://github.com/red-hat-data-services/konflux-central) repository.
 
@@ -15,10 +17,10 @@ git clone git@github.com:red-hat-data-services/konflux-central.git
 cd konflux-central
 ```
 
-- Check out the release branch
+- Check out the branch
 
 ```bash
-git checkout rhoai-3.5
+git checkout main
 ```
 
 - Navigate to the Tekton files for your component(s).
@@ -32,8 +34,8 @@ cd pipelineruns/openvino_model_server/.tekton
 - Commit and push your changes.
 
 ```bash
-git commit -am "Update pipelinerun for openvino_model_server (rhoai-3.5)"
-git push origin rhoai-3.5
+git commit -am "Update pipelinerun for openvino_model_server (main)"
+git push origin main
 ```
 
 - Once pushed, automation will automatically sync your updates to the corresponding component repository.
