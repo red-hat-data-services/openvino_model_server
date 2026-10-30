@@ -47,7 +47,7 @@ spec:
        {"type": "pip", "path": ".",
          "requirements_files": ["requirements.txt"],
          "binary": {"arch": "x86_64"}}
-      ]  
+      ]
   - name: build-source-image
     value: true
   - name: build-image-index
