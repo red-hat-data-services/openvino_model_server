@@ -116,13 +116,16 @@ lacks that 3.6 file; its inherited ODH/stable and RHOAI 3.5 files do not
 constitute the prepared RHOAI 3.6 pipeline. Do not rely on a component-only
 Tekton edit surviving synchronization.
 
-The Python lock and matching public inputs can be proposed in a PR now.
-The PR remains incomplete for a real build until the RPM lock is generated
-and its delivery to Konflux is resolved. If all artifact URLs are approved
-for publication, add the reviewed lock as rpms.lock.yaml. If URLs are private,
-keep the lock private and arrange an approved mechanism to make it available
-before both Hermeto prefetch and Dockerfile assembly. This PR does not yet
-implement that private delivery mechanism.
+The reviewed binary-only RPM lock is committed as rpms.lock.yaml at the
+repository root, alongside the Python lock and matching inputs. Its internal
+artifact URLs were explicitly approved for inclusion so Hermeto and the
+Dockerfile can consume the same lock. The repository configuration and
+resolver diagnostics stay outside the checkout. Future lock updates still
+need URL review before committing them.
+
+The Konflux prefetch task must be able to reach and trust the artifact
+endpoints in the lock. Committing the lock supplies the input; a real
+pipeline run must establish download access and validate the resulting image.
 
 The Dockerfile installs only from the
 prefetched local RPM repositories and wheels under /cachi2/output. It does
