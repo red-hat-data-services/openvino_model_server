@@ -1,5 +1,5 @@
 # AIPCC cpu-el9.8:3.6.0 application image, not the corresponding -source artifact.
-FROM quay.io/aipcc/base-images/cpu-el9.8@sha256:2a255b178a6b40d9e73ebb5ad199c22c3302bee6980ded45732031e215c7cbe7
+FROM quay.io/aipcc/base-images/cpu-el9.8@sha256:b42ea43cf2b44fd5d7c662067ccff0a831eeca22f949300590d79dd12b2cf110
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 USER 0
@@ -16,21 +16,21 @@ RUN --mount=type=bind,source=rpms.lock.yaml,target=/tmp/ovms-rpms.lock.yaml,ro \
         --setopt=install_weak_deps=False \
         --setopt=keepcache=False \
         install \
-        openvino_model_server-2026.4.0-1.el9 \
-        openvino-2026.4.0-14.el9 \
-        openvino-genai-2026.4.0.0-1.el9 \
-        openvino_tokenizers-2026.4.0.0-1.el9 \
-        ovms-abseil-cpp \
-        ovms-azure-sdk-for-cpp \
-        ovms-google-crc32c \
-        ovms-libgguf \
-        ovms-onnx-libs \
-        ovms-opencv \
-        ovms-protobuf \
-        ovms-protobuf-lite \
-        ovms-pugixml \
-        ovms-tbb-2022.3.0-4.el9ai \
-        ovms-xgrammar && \
+        openvino_model_server-2026.4.0-3.el9ai \
+        openvino-2026.4.0-14.el9ai \
+        openvino-genai-2026.4.0.0-1.el9ai \
+        openvino_tokenizers-2026.4.0.0-1.el9ai \
+        ovms-abseil-cpp-20240116.0-1.el9ai \
+        ovms-azure-sdk-for-cpp-12.18.0-1.el9ai \
+        ovms-google-crc32c-1.1.2-1.el9ai \
+        ovms-libgguf-0^20241104gitbac796a-1.el9ai \
+        ovms-onnx-libs-1.22.0-13.el9ai \
+        ovms-opencv-4.14.0-1.el9ai \
+        ovms-protobuf-5.26.0-22.el9ai \
+        ovms-protobuf-lite-5.26.0-22.el9ai \
+        ovms-pugixml-1.16-2.el9ai \
+        ovms-tbb-2022.3.0-6.el9ai \
+        ovms-xgrammar-0.1.31-1.el9ai && \
     dnf --noplugins \
         --setopt=reposdir=/cachi2/output/deps/rpm/x86_64/repos.d clean all
 
@@ -68,6 +68,7 @@ RUN test "$(id -u)" -eq 5000 && \
     test "$(python3.12 -c 'import sys; print(sys.prefix)')" = "/opt/app-root" && \
     python3.12 -c 'import pyovms; print(pyovms.__file__)' && \
     python3.12 -m pip --version && \
+    python3.12 -c 'from importlib.metadata import version; from pip._vendor.packaging.version import Version; assert Version(version("pip")) >= Version("26.2.2"); assert Version(version("certifi")) >= Version("2026.10.19")' && \
     python3.12 -m pip check && \
     /usr/bin/ovms --version
 

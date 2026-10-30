@@ -1,3 +1,6 @@
 # OpenVino CPU torch environment dependencies
 openvino==2026.4.0
 torch==2.13.0
+# Minimum versions required for the eMudhra certificate-handling correction.
+pip>=26.2.2
+certifi>=2026.10.19
