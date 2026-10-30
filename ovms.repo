@@ -1,5 +1,6 @@
-# STRAWMAN ONLY: replace both example.invalid URLs with the official binary
-# and matching source repositories. Confirm the product signing key as well.
+# TEMPLATE ONLY: copy outside this checkout, then edit the binary and matching
+# source URLs there by hand. Do not put internal endpoints into this file.
+# Confirm the product signing key and retain TLS/signature verification.
 # This is a lock-generation input, NOT a repository installed into the image.
 [ovms-rhel9-rpms]
 name=OVMS RHEL 9 x86_64 binaries - PLACEHOLDER
