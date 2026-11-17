@@ -42,6 +42,11 @@ RUN --mount=type=bind,source=requirements.txt,target=/tmp/ovms-requirements.txt,
         --find-links=/cachi2/output/deps/pip \
         --only-binary=:all: --require-hashes -r /tmp/ovms-requirements.txt
 
+# uv is only used by the connected lock-generation helper, not by the runtime image.
+RUN rm -f /opt/app-root/bin/uv /opt/app-root/bin/uvx && \
+    test ! -e /opt/app-root/bin/uv && \
+    test ! -e /opt/app-root/bin/uvx
+
 RUN groupadd --gid 5000 ovms && \
     groupadd --gid 44 video1 && \
     useradd \
